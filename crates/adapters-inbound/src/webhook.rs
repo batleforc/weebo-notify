@@ -3,13 +3,9 @@
 //! `/healthz` — and `/scope`, the kit's `ScopeGuard` (the chart's
 //! `scope.<group>` webhook, rendered with a `watch.labelSelector`).
 //!
-//! An admission webhook goes here too: `POST /validate` through
-//! `weebo_kit_runtime::admission::router` (an `Admission` impl naming the
-//! operator's reason code for a denial), typically enforcing a
-//! cluster-scoped `NotifyNamespacePolicy` CRD — which namespaces may
-//! create which kinds on which instance — with the kit's
-//! `weebo_kit_domain::allow_list`; the reconcilers then re-check the same
-//! rules, a policy may change after admission.
+//! TODO(2d): `POST /validate`, the admission webhook
+//! (`weebo_kit_runtime::admission::router`): each CR parsed and checked
+//! by Notify's own model (`notify-config`), as the reconcilers do.
 
 use std::sync::Arc;
 

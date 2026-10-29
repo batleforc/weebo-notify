@@ -2,8 +2,11 @@
 //! Kubernetes client here: adapters implement [`ports`] in
 //! `adapters-outbound`, `operator::main` injects them.
 
+pub mod objects;
 pub mod ports;
+pub mod render;
 pub mod use_cases;
+pub mod workload;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

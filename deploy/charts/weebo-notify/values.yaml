@@ -308,8 +308,8 @@ networkPolicy:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    # -- Egress rules (`to` + `ports`) to every Notify a
-    # NotifyInstance points at.
+    # -- Egress rules (`to` + `ports`) to the instances' pods (port 8080),
+    # whose /healthz the operator reads.
     notify: []
     # -- Egress rules to Vault, when a secretStore uses it.
     vault: []
@@ -319,3 +319,16 @@ networkPolicy:
 # -- Extra environment variables, e.g. OTEL_EXPORTER_OTLP_ENDPOINT or
 # RUST_LOG.
 extraEnv: []
+
+defaults:
+  # -- The server's image of an instance without `image` (`repository:tag`);
+  # empty: the Notify version the operator targets.
+  image: ""
+
+managedInstances:
+  # -- The image repositories an instance may run. Creating an instance
+  # runs pods with the namespace's labelled Secrets: keep this list to
+  # Notify's own images (or your mirrors of them).
+  allowedImages:
+    - ghcr.io/batleforc/weebo-notify
+    - ghcr.io/batleforc/weebo-notify-web

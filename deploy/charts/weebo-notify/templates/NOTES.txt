@@ -1,24 +1,29 @@
 {{ include "weebo-operator.notes" . }}
 
-1. Connect a Notify with an API token:
+1. Run a Notify instance (its database and object store are yours; the
+   Secrets it names carry the label notify.weebo.io/credential: "true"):
 
-     kubectl -n {{ .Release.Namespace }} create secret generic notify-admin --from-literal=token=<token>
-
-     kubectl apply -f - <<YAML
+     kubectl -n team apply -f - <<YAML
      apiVersion: notify.weebo.io/v1alpha1
-     kind: NotifyInstance
+     kind: NotifyLocalInstance
      metadata:
-       name: main
+       name: notify
      spec:
-       url: https://notify.example.com
-       tokenSecretRef:
-         namespace: {{ .Release.Namespace }}
-         name: notify-admin
-         key: token
+       database:
+         urlSecretRef: {name: notify-db, key: url}
+       attachments:
+         s3:
+           endpoint: http://rustfs:9000
+           bucket: notify
+           credentialsSecretRef: {name: notify-s3}
+       oidc:
+         issuer: https://id.example.com
+         clientId: notify
      YAML
 
-2. Then declare NotifyObject resources referencing it
-   (`spec.instanceRef: main`).
+2. Then declare its NotifyChannel, NotifyServiceAccount, NotifyTransform
+   and NotifyTrustPolicy resources (`spec.instanceRef` unset: the only
+   instance of their namespace).
 
 Argo CD: paste the health check of the
 {{ include "weebo-operator.fullname" . }}-argocd-health ConfigMap into argocd-cm under

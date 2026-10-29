@@ -20,4 +20,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 weebo-kit-adapters = { workspace = true }
+weebo-kit-application = { workspace = true }
 weebo-kit-runtime = { workspace = true }
+
+[lints]
+workspace = true

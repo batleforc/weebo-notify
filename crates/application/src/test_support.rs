@@ -1,124 +1,176 @@
-//! In-memory [`RemoteGateway`] for use-case and controller tests (exposed
-//! to other crates by the `test-support` feature).
+//! In-memory ports for the use-cases' tests (and other crates', with the
+//! `test-support` feature): the kit's owned objects, and this operator's
+//! credentials, object directory, status ledger and instances.
+
+// Test doubles, only built for tests (`cfg(test)` or the `test-support`
+// feature): a poisoned lock or a fixture that doesn't read fails the test.
+#![expect(clippy::unwrap_used, reason = "test doubles: a panic is a failed test")]
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use crate::ports::{GatewayError, ObjectPatch, Remote, RemoteGateway, RemoteObject};
+use api::local_instance::ObjectSelector;
+use api::status::InstanceStatus;
+pub use weebo_kit_application::test_support::FakeOwnedObjects;
 
-/// Remote objects keyed by name. Ids are handed out in creation order
-/// (`"1"`, `"2"`…) and kept across updates, like a real server's. Every
-/// write is recorded ([`FakeGateway::writes`]): a reconcile with nothing
-/// to change must leave it empty.
+use crate::objects::ObjectView;
+use crate::ports::{
+    ApiError, AttachedInstances, BoundInstance, CredentialError, Credentials, InstanceError,
+    ObjectDirectory, Owner, StatusLedger,
+};
+
+/// A `Secret`: whether it carries the credential label, and its keys.
+type FakeSecret = (bool, BTreeMap<String, String>);
+
+/// `Secret`s by `(namespace, name)`.
 #[derive(Default)]
-pub struct FakeGateway {
-    objects: Mutex<BTreeMap<String, (String, RemoteObject)>>,
-    next_id: Mutex<u64>,
-    failure: Mutex<Option<GatewayError>>,
-    writes: Mutex<Vec<String>>,
+pub struct FakeCredentials {
+    secrets: Mutex<BTreeMap<(String, String), FakeSecret>>,
 }
 
-impl FakeGateway {
-    /// Every call fails with `failure` until it is set back to `None`.
-    pub fn fail_with(&self, failure: Option<GatewayError>) {
-        *self.failure.lock().unwrap() = failure;
+impl FakeCredentials {
+    /// A labelled `Secret`.
+    pub fn insert(&self, namespace: &str, name: &str, data: &[(&str, &str)]) {
+        self.put(namespace, name, true, data);
     }
 
-    pub fn get(&self, name: &str) -> Option<RemoteObject> {
-        self.objects
-            .lock()
-            .unwrap()
-            .get(name)
-            .map(|(_, o)| o.clone())
+    /// A `Secret` without the credential label.
+    pub fn insert_unlabelled(&self, namespace: &str, name: &str, data: &[(&str, &str)]) {
+        self.put(namespace, name, false, data);
     }
 
-    /// Changes the object `name` behind the operator's back (a drift).
-    pub fn edit(&self, name: &str, edit: impl FnOnce(&mut RemoteObject)) {
-        if let Some((_, object)) = self.objects.lock().unwrap().get_mut(name) {
-            edit(object);
-        }
-    }
-
-    /// The writes received, oldest first: `create docs`,
-    /// `update docs [description]`, `delete docs`.
-    pub fn writes(&self) -> Vec<String> {
-        self.writes.lock().unwrap().clone()
-    }
-
-    pub fn clear_writes(&self) {
-        self.writes.lock().unwrap().clear();
-    }
-
-    fn check(&self) -> Result<(), GatewayError> {
-        match self.failure.lock().unwrap().clone() {
-            Some(err) => Err(err),
-            None => Ok(()),
-        }
-    }
-
-    fn wrote(&self, write: String) {
-        self.writes.lock().unwrap().push(write);
+    fn put(&self, namespace: &str, name: &str, labelled: bool, data: &[(&str, &str)]) {
+        self.secrets.lock().unwrap().insert(
+            (namespace.into(), name.into()),
+            (
+                labelled,
+                data.iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            ),
+        );
     }
 }
 
 #[async_trait::async_trait]
-impl RemoteGateway for FakeGateway {
-    async fn ping(&self) -> Result<(), GatewayError> {
-        self.check()
+impl Credentials for FakeCredentials {
+    async fn check(&self, namespace: &str, name: &str, key: &str) -> Result<(), CredentialError> {
+        self.read(namespace, name, key).await.map(|_| ())
     }
 
-    async fn read(&self, name: &str) -> Result<Option<Remote>, GatewayError> {
-        self.check()?;
-        Ok(self
-            .objects
-            .lock()
-            .unwrap()
-            .get(name)
-            .map(|(id, object)| Remote {
-                id: id.clone(),
-                object: object.clone(),
-            }))
-    }
-
-    async fn create(&self, object: &RemoteObject) -> Result<String, GatewayError> {
-        self.check()?;
-        let id = {
-            let mut next = self.next_id.lock().unwrap();
-            *next += 1;
-            next.to_string()
-        };
-        self.objects
-            .lock()
-            .unwrap()
-            .insert(object.name.clone(), (id.clone(), object.clone()));
-        self.wrote(format!("create {}", object.name));
-        Ok(id)
-    }
-
-    async fn update(&self, name: &str, patch: &ObjectPatch) -> Result<(), GatewayError> {
-        self.check()?;
-        let mut objects = self.objects.lock().unwrap();
-        let (_, object) = objects
-            .get_mut(name)
-            .ok_or_else(|| GatewayError::NotFound(name.to_string()))?;
-        let mut fields = Vec::new();
-        if let Some(description) = &patch.description {
-            object.description = Some(description.clone());
-            fields.push("description");
+    async fn read(
+        &self,
+        namespace: &str,
+        name: &str,
+        key: &str,
+    ) -> Result<String, CredentialError> {
+        let secrets = self.secrets.lock().unwrap();
+        let (labelled, data) = secrets
+            .get(&(namespace.into(), name.into()))
+            .ok_or_else(|| {
+                CredentialError::Missing(format!("secret {namespace}/{name} not found"))
+            })?;
+        if !labelled {
+            return Err(CredentialError::NotAllowed(format!(
+                "secret {namespace}/{name} lacks the label {}",
+                api::CREDENTIAL_LABEL
+            )));
         }
-        drop(objects);
-        self.wrote(format!("update {name} [{}]", fields.join(", ")));
+        data.get(key).cloned().ok_or_else(|| {
+            CredentialError::Missing(format!("secret {namespace}/{name} has no key {key:?}"))
+        })
+    }
+}
+
+/// The objects bound to every instance.
+#[derive(Default)]
+pub struct FakeDirectory {
+    views: Mutex<Vec<ObjectView>>,
+}
+
+impl FakeDirectory {
+    pub fn with(views: Vec<ObjectView>) -> Self {
+        Self {
+            views: Mutex::new(views),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ObjectDirectory for FakeDirectory {
+    async fn bound_to(
+        &self,
+        _instance: &Owner,
+        _selector: &ObjectSelector,
+    ) -> Result<Vec<ObjectView>, ApiError> {
+        Ok(self.views.lock().unwrap().clone())
+    }
+}
+
+/// Every status record, in order.
+#[derive(Default)]
+pub struct FakeLedger {
+    records: Mutex<Vec<serde_json::Map<String, serde_json::Value>>>,
+}
+
+impl FakeLedger {
+    pub fn last(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        self.records.lock().unwrap().last().cloned()
+    }
+}
+
+#[async_trait::async_trait]
+impl StatusLedger for FakeLedger {
+    async fn record(
+        &self,
+        _namespace: &str,
+        _name: &str,
+        fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), ApiError> {
+        self.records.lock().unwrap().push(fields);
         Ok(())
     }
+}
 
-    async fn delete(&self, name: &str) -> Result<(), GatewayError> {
-        self.check()?;
-        match self.objects.lock().unwrap().remove(name) {
-            Some(_) => {
-                self.wrote(format!("delete {name}"));
-                Ok(())
-            }
-            None => Err(GatewayError::NotFound(name.to_string())),
+/// One instance, `main` of the object's namespace, with the status given
+/// (none: it is gone).
+#[derive(Default)]
+pub struct FakeInstances {
+    instance: Mutex<Option<api::LocalInstance>>,
+}
+
+impl FakeInstances {
+    pub fn with_status(status: InstanceStatus) -> Self {
+        let spec = serde_json::from_value(serde_json::json!({
+            "database": {"urlSecretRef": {"name": "db", "key": "url"}},
+            "attachments": {"s3": {"endpoint": "http://s3", "bucket": "b",
+                                   "credentialsSecretRef": {"name": "s3"}}},
+            "oidc": {"issuer": "https://id.example", "clientId": "notify"},
+        }))
+        .unwrap();
+        let mut instance = api::LocalInstance::new("main", spec);
+        instance.status = Some(status);
+        Self {
+            instance: Mutex::new(Some(instance)),
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl AttachedInstances for FakeInstances {
+    async fn resolve_attached(
+        &self,
+        namespace: &str,
+        _instance_ref: Option<&weebo_kit_api::InstanceRef>,
+        _recorded: Option<&BoundInstance>,
+    ) -> Result<BoundInstance, InstanceError> {
+        Ok(BoundInstance::local(namespace, "main"))
+    }
+
+    async fn instance(
+        &self,
+        _bound: &BoundInstance,
+    ) -> Result<Option<api::LocalInstance>, ApiError> {
+        Ok(self.instance.lock().unwrap().clone())
     }
 }

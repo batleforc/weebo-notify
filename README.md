@@ -1,12 +1,21 @@
 # weebo-notify
 
-Kubernetes operator managing Notify objects as CRDs, built on
+Kubernetes operator running [weebo-notify](https://github.com/batleforc/weebo-notify-v2)
+and the objects it is configured with, built on
 [weebo-operator-kit](https://github.com/batleforc/weebo-operator-kit).
+`docs/plan.md` is the design.
 
-| Kind                | Scope      | What it does                                                       |
-| ------------------- | ---------- | ------------------------------------------------------------------ |
-| `NotifyInstance` | Cluster    | A Notify to drive: its URL and API token (`tokenSecretRef`) |
-| `NotifyObject`   | Namespaced | An object of that Notify, created, updated and deleted with the CR |
+| Kind                   | Short | What it does                                                         |
+| ---------------------- | ----- | -------------------------------------------------------------------- |
+| `NotifyLocalInstance`  | `nli` | A Notify the operator runs in its namespace, and its `config.toml`   |
+| `NotifyChannel`        | `nch` | A managed channel (`[[channels.managed]]`) of an instance            |
+| `NotifyServiceAccount` | `nsa` | A managed service account (`[[service_accounts]]`)                    |
+| `NotifyTransform`      | `ntr` | A JSON webhook transform (`[[transforms]]`, CEL)                      |
+| `NotifyTrustPolicy`    | `ntp` | A federation trust policy (`[[trust_policy]]`)                        |
+
+All namespaced. The objects are rendered into their instance's
+configuration (parsed and checked by Notify's own `notify-config`); Notify
+reloads the file when it changes.
 
 ## Layout
 
@@ -16,9 +25,9 @@ Hexagonal, one crate per layer, same rules as every weebo operator:
 | ------------------- | ------------------------------------------------------------------------ |
 | `domain`            | the reason codes (`reason_codes!`), no dependency                        |
 | `api`               | the CRD types (`#[derive(CustomResource)]`), the kit's shared field types |
-| `application`       | ports (`RemoteGateway`, `GatewayFactory`) and the `reconcile_*` use cases |
-| `adapters-outbound` | the Notify HTTP gateway — **the placeholder to replace with the real client** — and its factory |
-| `adapters-inbound`  | the controllers and the webhook router (health routes only for now)       |
+| `application`       | ports, the `config.toml` render (`render`), the `reconcile_*` use cases   |
+| `adapters-outbound` | the ports on the Kubernetes API (instances, bound objects, Secrets, status) |
+| `adapters-inbound`  | the controllers and the webhook router (health and scope routes for now)  |
 | `operator`          | the binary: telemetry, leader election, webhook server, controllers      |
 | `crdgen`            | writes `deploy/crd/` from `api` (CRDs, and `links.json` for the CRD IDE)  |
 | `testkit`           | envtest and fakes for the integration tests                               |
@@ -38,10 +47,6 @@ task doctor   # envtest prerequisites
 task recu     # CRDs (crdgen) and their copies in the chart
 task test:all # unit, contract and envtest tests — creates Cargo.lock: commit it
 ```
-
-Then replace the placeholder REST shape of
-`crates/adapters-outbound/src/http_gateway.rs` with the real
-Notify API, and grow `NotifyObject` into the real kinds.
 
 ## Tasks
 

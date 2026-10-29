@@ -9,56 +9,81 @@ weebo_kit_domain::reason_codes! {
     pub enum ReasonCode {
         /// `Ready: True` — the one success reason every reconciler uses.
         Reconciled,
-        /// `spec.instanceRef` names no `NotifyInstance` nor
-        /// `NotifyLocalInstance` the operator sees (or, unset, there is
-        /// none to default to).
+        /// The spec renders a configuration Notify would refuse at load (a
+        /// value out of range, a duration that doesn't parse, a CEL
+        /// expression that doesn't compile, a feed whose publisher may not
+        /// publish), or `extraConfig` sets what the CRs own. Only a change
+        /// of the spec clears it.
+        InvalidSpec,
+        /// `spec.instanceRef` names no `NotifyLocalInstance` the operator
+        /// sees (or, unset, there is none in the namespace to default to).
         InstanceNotFound,
         /// `spec.instanceRef` is unset and several instances could serve
         /// the object.
         InstanceAmbiguous,
-        /// The instance named is out of reach: a `NotifyLocalInstance`
-        /// of another namespace that doesn't share itself with this one, or
-        /// outside the namespace the operator is limited to.
+        /// The instance named is out of reach: one of another namespace
+        /// that doesn't accept objects of this one
+        /// (`objectSelector.namespaces`), or outside the namespace the
+        /// operator is limited to.
         InstanceNotAllowed,
         /// `spec.instanceRef` by name now designates another instance than
         /// the one recorded in `status.instance`: not followed until
-        /// `spec.instanceRef.kind` says which.
+        /// `spec.instanceRef.namespace` says which.
         InstanceBindingChanged,
-        /// The instance's `tokenSecretRef` Secret, or its key, is missing
-        /// or not UTF-8.
-        TokenSecretMissing,
-        /// The `tokenSecretRef` Secret of a `NotifyLocalInstance` lacks
-        /// the `instance-token: "true"` label: the operator only reads a
-        /// Secret that opts in.
-        TokenSecretNotAllowed,
-        /// The instance's spec can't produce a client (e.g. an invalid
-        /// `url`). Only a change of the CR clears it.
-        InvalidSpec,
-        /// Notify did not answer (network error, timeout, 502/503/504).
-        InstanceUnreachable,
-        /// Notify refused the instance's token (401/403).
-        InstanceUnauthorized,
-        /// Notify answered with an unexpected error.
-        RemoteError,
+        /// A `Secret` the operator would read, or the instance's pods
+        /// would mount, lacks the label `notify.weebo.io/credential:
+        /// "true"`.
+        SecretNotAllowed,
+        /// A referenced `Secret`, or its key, is missing.
+        SecretMissing,
+        /// An object the operator would create exists and isn't the
+        /// instance's (no owner reference, no `managed-by` label): never
+        /// taken over.
+        OwnedObjectConflict,
+        /// The configuration was written and the instance's pods haven't
+        /// all confirmed loading it yet (a ConfigMap takes up to a minute
+        /// to reach them).
+        ConfigPropagating,
+        /// Another object of the same kind on the instance holds the same
+        /// id: the oldest (`creationTimestamp`, then `namespace/name`) is
+        /// rendered, this one is left out.
+        IdConflict,
+        /// Notify's guard (`reconcile.maxRemovals`) refused this object's
+        /// removal: it keeps its finalizer until the guard lets it go
+        /// (`reconcile.allowMassRemoval`, or fewer removals at once).
+        RemovalRefused,
+        /// The image's tag isn't a Notify version the operator supports,
+        /// or goes back below `status.version`, or jumps more than one
+        /// minor: it needs `notify.weebo.io/approved-upgrade` set to that
+        /// tag.
+        UnsupportedVersion,
+        /// The migration `Job` of a new version runs: the pods stay on the
+        /// previous one until it succeeds.
+        Migrating,
+        /// The migration `Job` failed: the pods stay on the previous
+        /// version.
+        MigrationFailed,
         /// A Kubernetes API call of the operator itself failed (reading a
-        /// CR or a Secret, patching a status, the finalizer) — retried.
+        /// CR or a Secret, applying an object, patching a status) —
+        /// retried.
         KubernetesApiError,
-        /// The remote object was created for this CR (Event only).
-        Created,
-        /// Fields of the remote object no longer held their desired value
-        /// (changed on the remote side) and were put back; the Event names
-        /// them (Event only). Coming back on every reconcile for the same
-        /// field, it is a comparison bug, not a drift.
-        DriftCorrected,
-        /// The finalizer deleted the remote object of this CR (Event only).
-        Deleted,
-        /// The finalizer finished — cleanup done, or the CR force-orphaned
-        /// (Event only).
-        Released,
+        /// A transform names a channel id no `NotifyChannel` of the
+        /// instance declares: it may be a dynamic channel (advisory).
+        ChannelNotManaged,
         /// An update would take a CR still carrying the finalizer out of
         /// the operator's label selector (`watch.labelSelector`): refused
         /// at admission.
         LeavesWatchScope,
+        /// The pods loaded a new configuration (Event only).
+        ConfigApplied,
+        /// The pods rolled onto a new boot configuration or image (Event
+        /// only).
+        ConfigRolledOut,
+        /// The database was migrated to a new version (Event only).
+        Migrated,
+        /// The finalizer finished — cleanup done, or the CR force-orphaned
+        /// (Event only).
+        Released,
     }
 }
 
@@ -80,12 +105,32 @@ impl ReasonCode {
     pub const fn severity(self) -> Severity {
         match self {
             ReasonCode::Reconciled
-            | ReasonCode::Created
-            | ReasonCode::DriftCorrected
-            | ReasonCode::Deleted
+            | ReasonCode::ChannelNotManaged
+            | ReasonCode::ConfigApplied
+            | ReasonCode::ConfigRolledOut
+            | ReasonCode::Migrated
             | ReasonCode::Released => Severity::Advisory,
             _ => Severity::Blocking,
         }
+    }
+
+    /// Failures only a change of the spec (or of what it references) can
+    /// clear: retried on the steady interval rather than every 30 s. Each
+    /// is retried right away anyway by the change that clears it (the
+    /// kit's predicates, the watches).
+    pub const fn needs_a_change(self) -> bool {
+        matches!(
+            self,
+            ReasonCode::InvalidSpec
+                | ReasonCode::InstanceAmbiguous
+                | ReasonCode::InstanceNotAllowed
+                | ReasonCode::InstanceBindingChanged
+                | ReasonCode::SecretNotAllowed
+                | ReasonCode::OwnedObjectConflict
+                | ReasonCode::IdConflict
+                | ReasonCode::UnsupportedVersion
+                | ReasonCode::MigrationFailed
+        )
     }
 }
 
@@ -99,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn only_success_and_lifecycle_events_are_advisory() {
+    fn only_success_advisories_and_lifecycle_events_are_advisory() {
         let advisory: Vec<_> = ReasonCode::ALL
             .iter()
             .filter(|c| c.severity() == Severity::Advisory)
@@ -108,11 +153,23 @@ mod tests {
             advisory,
             [
                 &ReasonCode::Reconciled,
-                &ReasonCode::Created,
-                &ReasonCode::DriftCorrected,
-                &ReasonCode::Deleted,
+                &ReasonCode::ChannelNotManaged,
+                &ReasonCode::ConfigApplied,
+                &ReasonCode::ConfigRolledOut,
+                &ReasonCode::Migrated,
                 &ReasonCode::Released
             ]
         );
+    }
+
+    #[test]
+    fn only_failures_wait_for_a_change() {
+        for code in ReasonCode::ALL {
+            if code.needs_a_change() {
+                assert_eq!(code.severity(), Severity::Blocking, "{code}");
+            }
+        }
+        assert!(!ReasonCode::KubernetesApiError.needs_a_change());
+        assert!(!ReasonCode::ConfigPropagating.needs_a_change());
     }
 }

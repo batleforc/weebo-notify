@@ -1,10 +1,19 @@
 {
   "kinds": {
-    "NotifyInstance": {
+    "NotifyChannel": {
       "produces": [],
       "references": [
         {
-          "path": "spec.tokenSecretRef",
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.sinks[].secretRef",
           "to": [
             {
               "group": "",
@@ -18,7 +27,43 @@
       "produces": [],
       "references": [
         {
-          "path": "spec.tokenSecretRef",
+          "path": "spec.attachments.filesystem.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.database.urlSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.sinks.fingerprintKeySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.smtp.passwordSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.webPush.vapidKeySecretRef",
           "to": [
             {
               "group": "",
@@ -28,7 +73,7 @@
         }
       ]
     },
-    "NotifyObject": {
+    "NotifyServiceAccount": {
       "produces": [],
       "references": [
         {
@@ -36,8 +81,32 @@
           "to": [
             {
               "group": "notify.weebo.io",
-              "kind": "NotifyInstance"
-            },
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        }
+      ]
+    },
+    "NotifyTransform": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        }
+      ]
+    },
+    "NotifyTrustPolicy": {
+      "produces": [],
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
             {
               "group": "notify.weebo.io",
               "kind": "NotifyLocalInstance"

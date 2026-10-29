@@ -1,126 +1,16 @@
-//! Port traits: what the use-cases need from the outside world. One
-//! [`RemoteGateway`] per instance (`NotifyInstance` or
-//! `NotifyLocalInstance`), produced on demand by the
-//! [`GatewayFactory`]; which instance a CR lives on is the kit's
-//! [`InstanceDirectory`].
+//! Port traits: what the use-cases need from the outside world. Which
+//! instance a CR lives on is the kit's [`InstanceDirectory`] (on the local
+//! instances only); the objects of an instance are the kit's
+//! [`OwnedObjects`].
 
-use std::sync::Arc;
-
+use api::local_instance::ObjectSelector;
 use domain::error::ReasonCode;
 pub use weebo_kit_application::instances::{
     BoundInstance, InstanceDirectory, InstanceError, ResolveError,
 };
+pub use weebo_kit_application::workload::{OwnedObject, OwnedObjects, Owner, WorkloadError};
 
-/// A failed call to Notify.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum GatewayError {
-    /// No answer: network error, timeout, gateway errors.
-    #[error("Notify unreachable: {0}")]
-    Unreachable(String),
-    /// The token was refused.
-    #[error("Notify refused the token: {0}")]
-    Unauthorized(String),
-    #[error("not found in Notify: {0}")]
-    NotFound(String),
-    /// Any other unexpected answer.
-    #[error("Notify API error: {0}")]
-    Api(String),
-}
-
-impl GatewayError {
-    pub fn reason(&self) -> ReasonCode {
-        match self {
-            GatewayError::Unreachable(_) => ReasonCode::InstanceUnreachable,
-            GatewayError::Unauthorized(_) => ReasonCode::InstanceUnauthorized,
-            GatewayError::NotFound(_) | GatewayError::Api(_) => ReasonCode::RemoteError,
-        }
-    }
-}
-
-/// A remote object: the desired state the gateway creates, or the one it
-/// reads back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoteObject {
-    pub name: String,
-    /// Desired: `None` is no opinion, the remote value is left alone.
-    pub description: Option<String>,
-}
-
-/// A remote object as read: its identifier and its current state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Remote {
-    pub id: String,
-    pub object: RemoteObject,
-}
-
-/// The fields of an update: `None` is not sent. Built from the desired
-/// state with every field already holding its value removed
-/// (`domain::Drift`), so an update only carries what drifted.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ObjectPatch {
-    pub description: Option<String>,
-}
-
-/// Talks to one Notify instance.
-///
-/// `#[async_trait]` rather than native `async fn` in trait: it is used as
-/// `dyn RemoteGateway`, and native async-fn-in-traits are not
-/// `dyn`-compatible.
-#[async_trait::async_trait]
-pub trait RemoteGateway: Send + Sync {
-    /// Whether the instance answers and accepts the token.
-    async fn ping(&self) -> Result<(), GatewayError>;
-    /// The object `name`, `None` when there is none.
-    async fn read(&self, name: &str) -> Result<Option<Remote>, GatewayError>;
-    /// Creates the object; returns its remote identifier.
-    async fn create(&self, object: &RemoteObject) -> Result<String, GatewayError>;
-    /// Sends the fields of `patch` (only those) to the object `name`.
-    async fn update(&self, name: &str, patch: &ObjectPatch) -> Result<(), GatewayError>;
-    /// Deletes the object `name`; `NotFound` when it is already gone.
-    async fn delete(&self, name: &str) -> Result<(), GatewayError>;
-}
-
-/// Why no gateway could be built for an instance.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum GatewayFactoryError {
-    /// The instance is gone since it was resolved.
-    #[error("{0} not found")]
-    InstanceNotFound(BoundInstance),
-    /// The token `Secret` or its key is missing / not UTF-8.
-    #[error("token secret: {0}")]
-    TokenSecret(String),
-    /// A local instance's token `Secret` doesn't carry the consent label.
-    #[error("{0}")]
-    TokenNotAllowed(String),
-    /// A Kubernetes API read failed — usually transient.
-    #[error("Kubernetes API error: {0}")]
-    Kubernetes(String),
-    /// The instance's spec can't produce a client.
-    #[error("invalid instance: {0}")]
-    InvalidSpec(String),
-}
-
-impl GatewayFactoryError {
-    pub fn reason(&self) -> ReasonCode {
-        match self {
-            GatewayFactoryError::InstanceNotFound(_) => ReasonCode::InstanceNotFound,
-            GatewayFactoryError::TokenSecret(_) => ReasonCode::TokenSecretMissing,
-            GatewayFactoryError::TokenNotAllowed(_) => ReasonCode::TokenSecretNotAllowed,
-            GatewayFactoryError::Kubernetes(_) => ReasonCode::KubernetesApiError,
-            GatewayFactoryError::InvalidSpec(_) => ReasonCode::InvalidSpec,
-        }
-    }
-}
-
-/// The gateway of a resolved instance. Implementations re-read the token
-/// `Secret` on every call: rotating it needs no restart.
-#[async_trait::async_trait]
-pub trait GatewayFactory: Send + Sync {
-    async fn gateway_for(
-        &self,
-        instance: &BoundInstance,
-    ) -> Result<Arc<dyn RemoteGateway>, GatewayFactoryError>;
-}
+use crate::objects::ObjectView;
 
 /// The reason code of an instance that couldn't be resolved.
 pub fn instance_reason(err: &InstanceError) -> ReasonCode {
@@ -138,4 +28,127 @@ pub fn instance_reason(err: &InstanceError) -> ReasonCode {
             ResolveError::BindingChanged { .. } => ReasonCode::InstanceBindingChanged,
         },
     }
+}
+
+/// The reason code of a [`WorkloadError`].
+pub fn workload_reason(e: &WorkloadError) -> ReasonCode {
+    match e {
+        WorkloadError::Conflict(_) => ReasonCode::OwnedObjectConflict,
+        WorkloadError::Kubernetes(_) => ReasonCode::KubernetesApiError,
+        WorkloadError::Refused(_) => ReasonCode::InvalidSpec,
+        WorkloadError::SecretNotAllowed(_) => ReasonCode::SecretNotAllowed,
+    }
+}
+
+/// Why a Secret a spec references can't be used.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CredentialError {
+    /// The Secret or its key is missing.
+    #[error("{0}")]
+    Missing(String),
+    /// The Secret lacks `notify.weebo.io/credential: "true"`.
+    #[error("{0}")]
+    NotAllowed(String),
+    #[error("Kubernetes API error: {0}")]
+    Kubernetes(String),
+}
+
+impl CredentialError {
+    pub fn reason(&self) -> ReasonCode {
+        match self {
+            CredentialError::Missing(_) => ReasonCode::SecretMissing,
+            CredentialError::NotAllowed(_) => ReasonCode::SecretNotAllowed,
+            CredentialError::Kubernetes(_) => ReasonCode::KubernetesApiError,
+        }
+    }
+}
+
+/// A Kubernetes API call of a port that failed: what was asked, and why.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ApiError {
+    /// The API server refused the operator (401/403): its RBAC, which a
+    /// retry doesn't fix.
+    #[error("permission denied: {0}")]
+    Denied(String),
+    /// What the call was built from doesn't read (an invalid label
+    /// selector of the spec).
+    #[error("{0}")]
+    Invalid(String),
+    /// Unreachable, overloaded, timing out, or another refusal: usually
+    /// transient.
+    #[error("Kubernetes API error: {0}")]
+    Failed(String),
+}
+
+impl ApiError {
+    pub fn reason(&self) -> ReasonCode {
+        match self {
+            ApiError::Denied(_) | ApiError::Failed(_) => ReasonCode::KubernetesApiError,
+            ApiError::Invalid(_) => ReasonCode::InvalidSpec,
+        }
+    }
+}
+
+/// The Secrets the specs reference, used only when they carry the
+/// credential label. The pods read their values (`WNK_*`, mounted files):
+/// the configuration never holds one.
+#[async_trait::async_trait]
+pub trait Credentials: Send + Sync {
+    /// Whether the Secret `name` of `namespace` exists, consents and has
+    /// `key` — its value never read out.
+    async fn check(&self, namespace: &str, name: &str, key: &str) -> Result<(), CredentialError>;
+    /// The UTF-8 value of `key` of the Secret `name` of `namespace` (a
+    /// sink's secret, copied next to the instance's pods).
+    async fn read(&self, namespace: &str, name: &str, key: &str)
+    -> Result<String, CredentialError>;
+}
+
+/// Fresh secrets the operator generates.
+pub trait KeyGenerator: Send + Sync {
+    /// A key Notify takes as a secret string (the sinks' fingerprint key,
+    /// the filesystem store's link key): 48 random bytes, base64 (64
+    /// characters, over Notify's 32-byte floor).
+    fn key(&self) -> String;
+}
+
+/// Where a reconcile records status fields right after the write they
+/// describe (a status merge patch): a pass that fails half-way must not
+/// forget it wrote.
+#[async_trait::async_trait]
+pub trait StatusLedger: Send + Sync {
+    async fn record(
+        &self,
+        namespace: &str,
+        name: &str,
+        fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), ApiError>;
+}
+
+/// The `NotifyChannel`s, `NotifyServiceAccount`s, `NotifyTransform`s and
+/// `NotifyTrustPolicy`s bound to an instance.
+#[async_trait::async_trait]
+pub trait ObjectDirectory: Send + Sync {
+    /// Those recording `instance` in `status.instance` (their own
+    /// controller binds them), in scope of the operator, matching its
+    /// `selector`, from its own namespace or one it accepts — in any
+    /// order: the render sorts them.
+    async fn bound_to(
+        &self,
+        instance: &Owner,
+        selector: &ObjectSelector,
+    ) -> Result<Vec<ObjectView>, ApiError>;
+}
+
+/// The instances an object may bind to: resolution through the instance's
+/// consent (`objectSelector.namespaces`), and the instance itself.
+#[async_trait::async_trait]
+pub trait AttachedInstances: Send + Sync {
+    async fn resolve_attached(
+        &self,
+        namespace: &str,
+        instance_ref: Option<&weebo_kit_api::InstanceRef>,
+        recorded: Option<&BoundInstance>,
+    ) -> Result<BoundInstance, InstanceError>;
+    async fn instance(&self, bound: &BoundInstance)
+    -> Result<Option<api::LocalInstance>, ApiError>;
 }

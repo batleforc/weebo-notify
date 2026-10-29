@@ -25,14 +25,18 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     fs::create_dir_all(&args.out)?;
+    // A single instance kind: both roles name it.
     let roles = Roles {
-        instance: group_kind(&api::Instance::crd()),
+        instance: group_kind(&api::LocalInstance::crd()),
         local_instance: group_kind(&api::LocalInstance::crd()),
     };
     let mut kinds = BTreeMap::new();
-    write::<api::Instance>(&args.out, &roles, &mut kinds)?;
-    write::<api::LocalInstance>(&args.out, &roles, &mut kinds)?;
-    write::<api::Object>(&args.out, &roles, &mut kinds)?;
+    let out = &args.out;
+    write::<api::LocalInstance>(out, &roles, &mut kinds)?;
+    write::<api::Channel>(out, &roles, &mut kinds)?;
+    write::<api::ServiceAccount>(out, &roles, &mut kinds)?;
+    write::<api::Transform>(out, &roles, &mut kinds)?;
+    write::<api::TrustPolicy>(out, &roles, &mut kinds)?;
     // The kinds of the IDE only: the kit's shared ones (an OIDC issuer, a
     // registry mirrored…), then this operator's own, keyed by name, its
     // `spec` a Rust type with the same markers as a CRD's, e.g.
