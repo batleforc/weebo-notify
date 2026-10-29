@@ -1,0 +1,185 @@
+# What a Notify instance needs, disposable, for the kind e2e
+# (deploy/e2e/run.sh): Postgres, RustFS (S3) and Dex (OIDC, password
+# grant). Every credential here is e2e-only and holds nothing.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notify-deps
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: notify-deps
+spec:
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: notify }
+            - { name: POSTGRES_PASSWORD, value: e2e-only-insecure-password }
+            - { name: POSTGRES_DB, value: notify }
+            # Below the mount: initdb can't chmod an emptyDir it doesn't own.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: [pg_isready, -U, notify, -d, notify] }
+            periodSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: notify-deps
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: notify-deps
+spec:
+  selector:
+    matchLabels: { app: rustfs }
+  template:
+    metadata:
+      labels: { app: rustfs }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: rustfs
+          image: docker.io/rustfs/rustfs:1.0.2
+          env:
+            - { name: RUSTFS_ACCESS_KEY, value: notify-e2e }
+            - { name: RUSTFS_SECRET_KEY, value: e2e-only-insecure-password }
+            - { name: RUSTFS_VOLUMES, value: /data }
+          ports: [{ containerPort: 9000 }]
+          readinessProbe:
+            tcpSocket: { port: 9000 }
+            periodSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: logs, mountPath: /logs }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: logs, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: notify-deps
+spec:
+  selector: { app: rustfs }
+  ports: [{ port: 9000 }]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dex
+  namespace: notify-deps
+stringData:
+  # The issuer is the in-cluster URL Notify discovers; the e2e gets its
+  # token through a port-forward, the `iss` stays this one.
+  config.yaml: |
+    issuer: http://dex.notify-deps.svc.cluster.local:5556/dex
+    storage: { type: memory }
+    web: { http: 0.0.0.0:5556 }
+    oauth2:
+      passwordConnector: local
+      skipApprovalScreen: true
+    staticClients:
+      - id: weebo-notify
+        name: weebo-notify
+        secret: e2e-only-insecure-secret
+        redirectURIs: [http://localhost/callback]
+    enablePasswordDB: true
+    staticPasswords:
+      # Password: e2e-only-insecure-password
+      - email: alice@e2e.local
+        username: alice
+        hash: "$2a$10$DsdhMtGYdb0HrVZNr1JVhu.BPY.IekfAeCP6H40WL0T.51a7S/Bim"
+        userID: "9a1e0000-0000-4000-8000-00000000a11c"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: notify-deps
+spec:
+  selector:
+    matchLabels: { app: dex }
+  template:
+    metadata:
+      labels: { app: dex }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.46.0
+          args: [dex, serve, /etc/dex/config.yaml]
+          ports: [{ containerPort: 5556 }]
+          readinessProbe:
+            httpGet: { path: /dex/healthz, port: 5556 }
+            periodSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/dex }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: config, secret: { secretName: dex } }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: notify-deps
+spec:
+  selector: { app: dex }
+  ports: [{ port: 5556 }]

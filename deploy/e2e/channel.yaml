@@ -1,0 +1,12 @@
+# The channel of the kind e2e (deploy/e2e/run.sh). `__SUB__` is Alice's
+# `sub` at Dex, read from her token.
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyChannel
+metadata:
+  name: alerts
+  namespace: team
+spec:
+  name: Alerts
+  access:
+    - oidcSub: "__SUB__"
+      scopes: [publish, subscribe]

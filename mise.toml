@@ -19,3 +19,7 @@ actionlint = "latest"
 shellcheck = "latest"
 hadolint = "latest"
 helm = "latest"
+# The kind e2e (`task e2e`)
+kind = "latest"
+kubectl = "latest"
+jq = "latest"
