@@ -1,0 +1,16 @@
+---
+title: CRD reference
+description: Every kind the operator adds, its fields, and an interactive manifest builder.
+---
+
+Each page lists a kind's `spec` fields, shows a minimal example, and has a
+form that builds a ready-to-apply manifest. These pages are generated from
+the CRDs themselves, so they always match the installed version.
+
+| Kind | Short names | Scope | Description |
+| --- | --- | --- | --- |
+| [`NotifyLocalInstance`](/docs/crds/notifylocalinstance) | `nli` | Namespaced | A Notify instance the operator runs in this namespace: the server's `Deployment` and its migration `Job`, the web UI, their configuration (rendered from this spec and the channels, service accounts, transforms and trust policies that attach to it) and the objects around them. |
+| [`NotifyChannel`](/docs/crds/notifychannel) | `nch` | Namespaced | A managed channel of a Notify instance (`[[channels.managed]]`): its policy, who may publish, subscribe and manage, where it forwards, what it polls. |
+| [`NotifyServiceAccount`](/docs/crds/notifyserviceaccount) | `nsa` | Namespaced | A managed service account of a Notify instance (`[[service_accounts]]`): a machine identity channels grant scopes to. |
+| [`NotifyTransform`](/docs/crds/notifytransform) | `ntr` | Namespaced | A JSON webhook transform of a Notify instance (`[[transforms]]`): CEL programs that turn the JSON a third party posts to a channel into notifications. |
+| [`NotifyTrustPolicy`](/docs/crds/notifytrustpolicy) | `ntp` | Namespaced | A federation trust policy of a Notify instance (`[[trust_policy]]`): CI jobs whose OIDC token comes from `issuer` with subject `subject` exchange it for a Notify token holding `scopes` on `channels`. |

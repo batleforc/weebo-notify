@@ -1,0 +1,78 @@
+---
+title: NotifyTransform
+description: >-
+  A JSON webhook transform of a Notify instance ([[transforms]]): CEL programs
+  that turn the JSON a third party posts to a channel into notifications.
+full: true
+---
+
+- **API version:** `notify.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** `ntr`
+- **Guide:** [Install via Helm](/docs/guides/install)
+
+A JSON webhook transform of a Notify instance (`[[transforms]]`): CEL
+programs that turn the JSON a third party posts to a channel into
+notifications. The expressions are checked with Notify's own compiler
+when the CR is applied. Rendered into the instance's configuration;
+`Ready` once every pod of the instance applied it. Holds no state in
+Notify: deleting it removes it at once.
+
+## Example
+
+```yaml
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyTransform
+metadata:
+  name: my-transform
+  namespace: team-a
+spec:
+  channels:
+    - alerts
+  title: body.title
+  body: body.message
+  split: body.alerts
+  maxItems: 10
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `ack` | `string` | no |  | CEL: a button label, or `null` for none. |
+| `body` | `string` | no |  | CEL: a string, Markdown. |
+| `channels` | `string[]` | yes |  | The channel ids it publishes into. One that no `NotifyChannel` declares is accepted (it may be a dynamic channel), with an advisory.<br /><br />Constraints: `minItems: 1` |
+| `externalId` | `string` | no |  | CEL: a string or a number; unset, a digest of the element. |
+| `groupKey` | `string` | no |  | CEL: a string. |
+| `id` | `string` | no |  | Its id in Notify, unique on the instance and the path segment producers post to (`/api/v1/compat/json/{id}/{channel}`): unset, `metadata.name`.<br /><br />Constraints: `pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, `minLength: 1`, `maxLength: 64` |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The instance it belongs to: unset, the only one of this namespace. An instance of another namespace must accept this one (`objectSelector.namespaces`). |
+| `lang` | `string` | no |  | The language of the strings it writes: the "Open" label, the truncation marker.<br /><br />Values: `"en"`, `"fr"` |
+| `link` | `string` | no |  | CEL: an http(s) URL, the "Open" button. |
+| `maxItems` | `integer` | no |  | With `split` only: the most elements one post may carry (more is a `422`). Notify: 20.<br /><br />Constraints: `minimum: 1`, `maximum: 50` |
+| `priority` | `string` | no |  | CEL: `min`, `low`, `default`, `high` or `urgent`. |
+| `raw` | `string` | no |  | The received JSON appended to the body: `item` (with `split`) or the whole `payload`.<br /><br />Values: `"off"`, `"item"`, `"payload"` |
+| `split` | `string` | no |  | The expressions below are CEL over `body`, the received JSON (and `item` with `split`); a literal string needs CEL quotes (`'"news"'`). CEL, optional: a list, one notification per element. |
+| `state` | `string` | no |  | CEL: `open`, `working` or `closed`. |
+| `status` | `string` | no |  | CEL: `success`, `failure`, `warning`, `info` or `cancelled`. |
+| `tags` | `string` | no |  | CEL: a list of strings. |
+| `title` | `string` | yes |  | CEL: a string.<br /><br />Constraints: `minLength: 1` |
+| `titleFallback` | `string` | no |  | A plain string, the title when `title` fails or is empty; unset, the id. |
+| `update` | `boolean` | no |  | `false`: an element already published is skipped; `true`: it is revised. |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="NotifyTransform" />

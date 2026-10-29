@@ -1,0 +1,38 @@
+---
+title: weebo-notify
+description: A Kubernetes operator that runs weebo-notify instances and their objects as CRDs.
+---
+
+`weebo-notify` runs [weebo-notify](https://github.com/batleforc/weebo-notify-v2),
+the self-hosted notification hub, from Kubernetes. A `NotifyLocalInstance`
+is a Notify the operator runs in its namespace — its migration Job, its
+server and web UI, their Services, Ingresses and NetworkPolicies. The
+objects Notify is configured with are CRs of their own, rendered into the
+instance's `config.toml`:
+
+| Kind                   | Short | Rendered as                                    |
+| ---------------------- | ----- | ---------------------------------------------- |
+| `NotifyChannel`        | `nch` | a managed channel (`[[channels.managed]]`)     |
+| `NotifyServiceAccount` | `nsa` | a managed service account (`[[service_accounts]]`) |
+| `NotifyTransform`      | `ntr` | a JSON webhook transform (`[[transforms]]`, CEL) |
+| `NotifyTrustPolicy`    | `ntp` | a federation trust policy (`[[trust_policy]]`) |
+
+The operator parses the file it renders with Notify's own `notify-config`
+before writing it: an object Notify would refuse is left out alone, with
+Notify's message in its status. Notify reloads the file when it changes,
+and reports on `/healthz` the digest of the configuration it applied: an
+object is `Ready` once every pod of its instance applied a file that
+holds it.
+
+<Callout type="info">
+  The operator targets Notify v0.3.1. An instance moves one minor version
+  at a time, never below the version its database was migrated to.
+</Callout>
+
+## Get started
+
+<Cards>
+  <Card title="Install via Helm" description="Bring up the operator." href="/docs/guides/install" />
+  <Card title="Migrate from the Helm chart" description="Move a Notify installed with its chart to a NotifyLocalInstance." href="/docs/guides/migrate-from-helm-chart" />
+  <Card title="CRD reference" description="Every field of every resource." href="/docs/crds/notifylocalinstance" />
+</Cards>

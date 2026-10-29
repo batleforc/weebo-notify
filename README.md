@@ -58,6 +58,9 @@ task test:all    # + envtest integration tests
 task coverage    # cargo llvm-cov, fails under 85%
 task audit       # cargo-deny + trivy + trivy config
 task kit:sync TAG=vX.Y.Z  # move to another kit release (crates, tasks, CI, chart, cog.toml)
+task golden:update  # rewrite the golden files (rendered config.toml, an instance's objects)
+task e2e         # kind e2e on a real Notify (Postgres, RustFS, Dex); CI runs it on PRs and before a release
+task docs        # the docs site (docs/, @weebo/operator-docs) in dev mode; task recu regenerates its CRD pages
 ```
 
 `lint`, `audit`, `coverage`, `doctor` and the chart tasks are the kit's

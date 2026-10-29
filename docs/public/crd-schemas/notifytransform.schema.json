@@ -1,0 +1,154 @@
+{
+  "apiVersion": "notify.weebo.io/v1alpha1",
+  "kind": "NotifyTransform",
+  "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
+  "description": "A JSON webhook transform of a Notify instance (`[[transforms]]`): CEL\nprograms that turn the JSON a third party posts to a channel into\nnotifications. The expressions are checked with Notify's own compiler\nwhen the CR is applied. Rendered into the instance's configuration;\n`Ready` once every pod of the instance applied it. Holds no state in\nNotify: deleting it removes it at once.",
+  "properties": {
+    "ack": {
+      "description": "CEL: a button label, or `null` for none.",
+      "nullable": true,
+      "type": "string"
+    },
+    "body": {
+      "description": "CEL: a string, Markdown.",
+      "nullable": true,
+      "type": "string"
+    },
+    "channels": {
+      "description": "The channel ids it publishes into. One that no `NotifyChannel`\ndeclares is accepted (it may be a dynamic channel), with an advisory.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "externalId": {
+      "description": "CEL: a string or a number; unset, a digest of the element.",
+      "nullable": true,
+      "type": "string"
+    },
+    "groupKey": {
+      "description": "CEL: a string.",
+      "nullable": true,
+      "type": "string"
+    },
+    "id": {
+      "description": "Its id in Notify, unique on the instance and the path segment\nproducers post to (`/api/v1/compat/json/{id}/{channel}`): unset,\n`metadata.name`.",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "type": "string"
+    },
+    "instanceRef": {
+      "description": "The instance it belongs to: unset, the only one of this namespace.\nAn instance of another namespace must accept this one\n(`objectSelector.namespaces`).",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "lang": {
+      "description": "The language of the strings it writes: the \"Open\" label, the\ntruncation marker.",
+      "enum": [
+        "en",
+        "fr"
+      ],
+      "type": "string"
+    },
+    "link": {
+      "description": "CEL: an http(s) URL, the \"Open\" button.",
+      "nullable": true,
+      "type": "string"
+    },
+    "maxItems": {
+      "description": "With `split` only: the most elements one post may carry (more is a\n`422`). Notify: 20.",
+      "format": "uint32",
+      "maximum": 50,
+      "minimum": 1,
+      "nullable": true,
+      "type": "integer"
+    },
+    "priority": {
+      "description": "CEL: `min`, `low`, `default`, `high` or `urgent`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "raw": {
+      "description": "The received JSON appended to the body: `item` (with `split`) or the\nwhole `payload`.",
+      "enum": [
+        "off",
+        "item",
+        "payload"
+      ],
+      "type": "string"
+    },
+    "split": {
+      "description": "The expressions below are CEL over `body`, the received JSON (and\n`item` with `split`); a literal string needs CEL quotes\n(`'\"news\"'`). CEL, optional: a list, one notification per element.",
+      "nullable": true,
+      "type": "string"
+    },
+    "state": {
+      "description": "CEL: `open`, `working` or `closed`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "status": {
+      "description": "CEL: `success`, `failure`, `warning`, `info` or `cancelled`.",
+      "nullable": true,
+      "type": "string"
+    },
+    "tags": {
+      "description": "CEL: a list of strings.",
+      "nullable": true,
+      "type": "string"
+    },
+    "title": {
+      "description": "CEL: a string.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "titleFallback": {
+      "description": "A plain string, the title when `title` fails or is empty; unset, the\nid.",
+      "nullable": true,
+      "type": "string"
+    },
+    "update": {
+      "description": "`false`: an element already published is skipped; `true`: it is\nrevised.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "channels",
+    "title"
+  ],
+  "type": "object"
+}

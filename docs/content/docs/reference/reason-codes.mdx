@@ -1,0 +1,55 @@
+---
+title: Reason codes
+description: Every code the operator puts on a condition, an Event or an admission denial.
+---
+
+Every condition, Event and admission denial the operator writes carries one
+of these codes, never free text: alerts, scripts and `kubectl` filters can
+rely on them. The list is generated from the operator's source, so it
+matches the installed version.
+
+- **Blocking**: `Ready` turns `False` with this reason, and every failed
+  reconcile records a `Warning` Event with it ([Events](/docs/reference/events)).
+  An admission webhook denial carries one too (HTTP 403, the code as its
+  reason).
+- **Advisory**: the CR still works. `Reconciled` is the reason of `Ready: True`; the
+  others are a condition of their own (its `type` is the code, its
+  `status` `"True"`) or a lifecycle Event.
+
+Every CR's `Ready` reason also labels the reconcile counter
+([Metrics & health](/docs/reference/metrics)), so a code can be graphed and
+alerted on. To find where one shows up right now:
+
+```bash
+kubectl get events -A --field-selector reason=InvalidSpec
+```
+
+| Code | Severity | Shows as | Meaning |
+| --- | --- | --- | --- |
+| `Reconciled` | advisory | `Ready: True` | `Ready: True` — the one success reason every reconciler uses. |
+| `InvalidSpec` | blocking | `Ready: False`, Event (`Warning`), admission denial | The spec renders a configuration Notify would refuse at load (a value out of range, a duration that doesn't parse, a CEL expression that doesn't compile, a feed whose publisher may not publish), or `extraConfig` sets what the CRs own. Only a change of the spec clears it. |
+| `InstanceNotFound` | blocking | `Ready: False`, Event (`Warning`) | `spec.instanceRef` names no `NotifyLocalInstance` the operator sees (or, unset, there is none in the namespace to default to). |
+| `InstanceAmbiguous` | blocking | `Ready: False`, Event (`Warning`) | `spec.instanceRef` is unset and several instances could serve the object. |
+| `InstanceNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | The instance named is out of reach: one of another namespace that doesn't accept objects of this one (`objectSelector.namespaces`), or outside the namespace the operator is limited to. |
+| `InstanceBindingChanged` | blocking | `Ready: False`, Event (`Warning`) | `spec.instanceRef` by name now designates another instance than the one recorded in `status.instance`: not followed until `spec.instanceRef.namespace` says which. |
+| `SecretNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | A `Secret` the operator would read, or the instance's pods would mount, lacks the label `notify.weebo.io/credential: "true"`. |
+| `SecretMissing` | blocking | `Ready: False`, Event (`Warning`) | A referenced `Secret`, or its key, is missing. |
+| `OwnedObjectConflict` | blocking | `Ready: False`, Event (`Warning`) | An object the operator would create exists and isn't the instance's (no owner reference, no `managed-by` label): never taken over. |
+| `ConfigPropagating` | blocking | `Ready: False`, Event (`Warning`) | The configuration was written and the instance's pods haven't all confirmed loading it yet (a ConfigMap takes up to a minute to reach them). |
+| `IdConflict` | blocking | `Ready: False`, Event (`Warning`) | Another object of the same kind on the instance holds the same id: the oldest (`creationTimestamp`, then `namespace/name`) is rendered, this one is left out. |
+| `RemovalRefused` | blocking | `Ready: False`, Event (`Warning`) | Notify's guard (`reconcile.maxRemovals`) refused this object's removal: it keeps its finalizer until the guard lets it go (`reconcile.allowMassRemoval`, or fewer removals at once). |
+| `UnsupportedVersion` | blocking | `Ready: False`, Event (`Warning`) | The image's tag isn't a Notify version the operator supports, or goes back below `status.version`, or jumps more than one minor: it needs `notify.weebo.io/approved-upgrade` set to that tag. |
+| `Migrating` | blocking | `Ready: False`, Event (`Warning`) | The migration `Job` of a new version runs: the pods stay on the previous one until it succeeds. |
+| `MigrationFailed` | blocking | `Ready: False`, Event (`Warning`) | The migration `Job` failed: the pods stay on the previous version. |
+| `WorkloadNotReady` | blocking | `Ready: False`, Event (`Warning`) | The server's pods aren't all ready on the desired image and boot configuration yet (rolling out, or not scheduled). |
+| `MonitoringUnavailable` | advisory | condition `MonitoringUnavailable: True`, Event (`Normal`) | `serviceMonitor.enabled` but the cluster has no `ServiceMonitor` kind (no Prometheus operator): none is created (advisory). |
+| `InstanceInUse` | blocking | `Ready: False`, Event (`Warning`) | The instance is being deleted while channels, service accounts, transforms or trust policies are still bound to it: it waits for them. |
+| `RestartPending` | advisory | condition `RestartPending: True`, Event (`Normal`) | A pod reports a change only a restart applies although its boot configuration is current: the operator's boot/hot split missed a key (advisory; restart the pods to apply it). |
+| `ApiNotExposed` | advisory | condition `ApiNotExposed: True`, Event (`Normal`) | The web UI is on but nothing exposes the API to browsers (no `server.publicUrl`, no `ingress`): the UI points at the in-cluster `Service` (advisory). |
+| `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`) | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
+| `ChannelNotManaged` | advisory | condition `ChannelNotManaged: True`, Event (`Normal`) | A transform names a channel id no `NotifyChannel` of the instance declares: it may be a dynamic channel (advisory). |
+| `LeavesWatchScope` | blocking | `Ready: False`, Event (`Warning`) | An update would take a CR still carrying the finalizer out of the operator's label selector (`watch.labelSelector`): refused at admission. |
+| `ConfigApplied` | advisory | Event (`Normal`) | The pods loaded a new configuration (Event only). |
+| `ConfigRolledOut` | advisory | Event (`Normal`) | The pods rolled onto a new boot configuration or image (Event only). |
+| `Migrated` | advisory | Event (`Normal`) | The database was migrated to a new version (Event only). |
+| `Released` | advisory | Event (`Normal`) | The finalizer finished — cleanup done, or the CR force-orphaned (Event only). |

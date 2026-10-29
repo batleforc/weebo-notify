@@ -1,0 +1,139 @@
+---
+title: NotifyChannel
+description: >-
+  A managed channel of a Notify instance ([[channels.managed]]): its policy, who
+  may publish, subscribe and manage, where it forwards, what it polls.
+full: true
+---
+
+- **API version:** `notify.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** `nch`
+- **Guide:** [Install via Helm](/docs/guides/install)
+
+A managed channel of a Notify instance (`[[channels.managed]]`): its
+policy, who may publish, subscribe and manage, where it forwards, what
+it polls. Rendered into the instance's configuration; `Ready` once
+every pod of the instance applied it. Deleting it archives the channel
+in Notify (it becomes dynamic, its history kept) or deletes it with its
+notifications, as the instance's `channels.onRemoved` says.
+
+## Example
+
+```yaml
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyChannel
+metadata:
+  name: my-channel
+  namespace: team-a
+spec:
+  name: Alerts
+  defaultTtl: 48h
+  access:
+    - oidcGroup: ops
+      scopes:
+        - subscribe
+        - manage
+    - serviceAccount: grafana
+      scopes:
+        - publish
+  sinks:
+    - type: email
+      address: oncall@example.com
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`access`](#spec.access) | `object[]` | no |  | Who holds which scopes. A `serviceAccount` names a service account id of the same instance (a `NotifyServiceAccount`). At most 256.<br /><br />Constraints: `maxItems: 256` |
+| `closeAfter` | `string` | no |  | Inactivity after which Notify closes an open notification (revisions and acknowledgements count as activity); `"0"`: publishers close their own. Unset: one week. |
+| `defaultPriority` | `string` | no |  | Values: `"min"`, `"low"`, `"default"`, `"high"`, `"urgent"` |
+| `defaultTtl` | `string` | no |  | How long a notification is kept when its publisher says nothing (`48h`, `30d`; `"0"`, for ever, needs the instance's `retention.allowForever`). Unset: the instance's. |
+| [`feeds`](#spec.feeds) | `object[]` | no |  | RSS, Atom and JSON feeds polled into the channel. At most 32.<br /><br />Constraints: `maxItems: 32` |
+| `id` | `string` | no |  | Its id in Notify, unique on the instance, what publishers address: unset, `metadata.name`. **Immutable**: another id is another channel.<br /><br />Constraints: `pattern: ^[a-z0-9]([-_.a-z0-9]*[a-z0-9])?$`, `minLength: 1`, `maxLength: 64` |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The instance it belongs to: unset, the only one of this namespace. An instance of another namespace must accept this one (`objectSelector.namespaces`). |
+| `maxTtl` | `string` | no |  | The longest TTL a publisher may ask for; a longer one is clamped. |
+| `name` | `string` | no |  | The name the inbox shows. |
+| `publishPerMin` | `integer` | no |  | The most notifications one principal may publish per minute.<br /><br />Constraints: `minimum: 1` |
+| [`publishers`](#spec.publishers) | `object[]` | no |  | CI jobs that may publish here with their forge's OIDC token: a trust policy scoped to this channel, taking priority over the instance's `NotifyTrustPolicy`s.<br /><br />Constraints: `maxItems: 64` |
+| `receipts` | `boolean` | no |  | Record who read each notification. |
+| [`sinks`](#spec.sinks) | `object[]` | no |  | Where every notification is also delivered. At most 16.<br /><br />Constraints: `maxItems: 16` |
+
+**Rules**
+
+- `feeds`: a feed url appears once per channel — `self.all(f, self.exists_one(o, o.url == f.url))`
+- `id`: id is immutable: delete the channel and create another — `self == oldSelf`
+
+### `spec.access[]` [#spec.access]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `email` | `string` | no |  | One person, by their verified email; takes effect at their first login. |
+| `oidcGroup` | `string` | no |  | Everyone in this group of the identity provider. |
+| `oidcSub` | `string` | no |  | One person, by their `sub` at the identity provider. |
+| `scopes` | `string[]` | yes |  | Values: `"publish"`, `"subscribe"`, `"manage"`<br /><br />Constraints: `minItems: 1` |
+| `serviceAccount` | `string` | no |  | A service account id of the instance. |
+
+**Rules**
+
+- an access binding names exactly one of oidcGroup, oidcSub, email and serviceAccount — `[has(self.oidcGroup), has(self.oidcSub), has(self.email), has(self.serviceAccount)].filter(x, x).size() == 1`
+
+### `spec.feeds[]` [#spec.feeds]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `allowPrivateNetwork` | `boolean` | no |  | Poll a non-public address (refused otherwise). |
+| `every` | `string` | no |  | How often it is polled, from `5m` to `24h`. Notify: `30m`. |
+| `lang` | `string` | no |  | The language of the "Open" label and the summary title.<br /><br />Values: `"en"`, `"fr"` |
+| `maxPerPoll` | `integer` | no |  | The most new items one poll publishes, from 1 to 50. Notify: 10.<br /><br />Constraints: `minimum: 1`, `maximum: 50` |
+| `publisher` | `string` | yes |  | The service account it publishes as: it must hold `publish` in this channel's `access`. |
+| `tags` | `string[]` | no |  | Added to every item. |
+| `url` | `string` | yes |  | http(s), no `user:pass@`. Changing it makes another feed, which primes again.<br /><br />Constraints: `minLength: 1`, `maxLength: 2048` |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
+
+### `spec.publishers[]` [#spec.publishers]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `issuer` | `string` | yes |  | The forge's OIDC issuer.<br /><br />Constraints: `minLength: 1` |
+| `scopes` | `string[]` | yes |  | Values: `"publish"`, `"subscribe"`, `"manage"`<br /><br />Constraints: `minItems: 1` |
+| `subject` | `string` | yes |  | The token's `sub` claim.<br /><br />Constraints: `minLength: 1` |
+
+### `spec.sinks[]` [#spec.sinks]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `address` | `string` | no |  | `email`: where it goes, through the instance's `smtp` relay. |
+| [`secretRef`](#spec.sinks.secretRef) | `object` | no |  | `webhook`: the secret each delivery is signed with, in a `Secret` of the channel's namespace labelled `notify.weebo.io/credential: "true"`. Mounted into the instance's pods, never written into its configuration. |
+| `type` | `string` | yes |  | Values: `"webhook"`, `"email"` |
+| `url` | `string` | no |  | `webhook`: where it posts, http(s), with no credentials in it (the url is stored and logged): put them in `secretRef`. |
+
+**Rules**
+
+- a webhook sink has a url and a secretRef (it signs every delivery), no address — `self.type != 'webhook' || (has(self.url) && has(self.secretRef) && !has(self.address))`
+- an email sink has an address only; the relay is the instance's smtp — `self.type != 'email' || (has(self.address) && !has(self.url) && !has(self.secretRef))`
+
+### `spec.sinks[].secretRef` [#spec.sinks.secretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="NotifyChannel" />

@@ -1,0 +1,12 @@
+---
+title: CRD IDE
+description: Compose linked Notify resources and export them as manifests.
+full: true
+---
+
+Add resources, point each reference field (an `instanceRef`, a
+`secretRef`…) at another resource of the project or at the Secret it
+names, and export the whole set as YAML. To start from what runs in a
+cluster, import `kubectl get <kinds> -A -o yaml`.
+
+<CrdIde />

@@ -1,0 +1,65 @@
+---
+title: NotifyTrustPolicy
+description: >-
+  A federation trust policy of a Notify instance ([[trust_policy]]): CI jobs
+  whose OIDC token comes from issuer with subject subject exchange it for a
+  Notify token holding scopes on channels.
+full: true
+---
+
+- **API version:** `notify.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** `ntp`
+- **Guide:** [Install via Helm](/docs/guides/install)
+
+A federation trust policy of a Notify instance (`[[trust_policy]]`):
+CI jobs whose OIDC token comes from `issuer` with subject `subject`
+exchange it for a Notify token holding `scopes` on `channels`. Rendered
+into the instance's configuration; `Ready` once every pod of the
+instance applied it. A new `issuer` takes a restart of the instance's
+pods (its verifier is built at boot): the operator rolls them.
+
+## Example
+
+```yaml
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyTrustPolicy
+metadata:
+  name: my-trustpolicy
+  namespace: team-a
+spec:
+  issuer: https://token.actions.githubusercontent.com
+  subject: repo:acme/app:ref:refs/heads/main
+  channels:
+    - alerts
+  scopes:
+    - publish
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `channels` | `string[]` | yes |  | The channel ids the exchanged token reaches.<br /><br />Constraints: `minItems: 1` |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The instance it belongs to: unset, the only one of this namespace. An instance of another namespace must accept this one (`objectSelector.namespaces`). |
+| `issuer` | `string` | yes |  | The CI forge's OIDC issuer, e.g. `https://token.actions.githubusercontent.com`.<br /><br />Constraints: `minLength: 1` |
+| `scopes` | `string[]` | yes |  | Values: `"publish"`, `"subscribe"`, `"manage"`<br /><br />Constraints: `minItems: 1` |
+| `subject` | `string` | yes |  | The token's `sub` claim, as the forge writes it.<br /><br />Constraints: `minLength: 1` |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="NotifyTrustPolicy" />

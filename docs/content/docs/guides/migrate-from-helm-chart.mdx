@@ -1,0 +1,114 @@
+---
+title: Migrate from the Helm chart
+description: Move a Notify installed with its own chart (charts/weebo-notify of weebo-notify-v2) to a NotifyLocalInstance, keeping its data.
+---
+
+A Notify installed with the chart of
+[weebo-notify-v2](https://github.com/batleforc/weebo-notify-v2/tree/main/charts/weebo-notify)
+moves to a `NotifyLocalInstance` on the same database and object store:
+its notifications, users, subscriptions and history stay. What the chart
+took from `values.yaml` becomes the instance's `spec`; what
+`server.extraConfig` declared (managed channels, service accounts,
+transforms, trust policies) becomes CRs.
+
+## The keys to keep
+
+Four keys outlive a deployment. Point the instance at the Secrets that
+hold them now, never let it generate new ones:
+
+| Chart value                          | `NotifyLocalInstance` field                 | A new one would…                                      |
+| ------------------------------------ | ------------------------------------------- | ----------------------------------------------------- |
+| `server.push.webpush.existingSecret` | `webPush.vapidKeySecretRef`                 | silently invalidate every push subscription           |
+| `server.sinks.fingerprintKey`        | `sinks.fingerprintKeySecretRef`             | change the ids of every webhook and feed url          |
+| `server.federation.existingSecret`   | `federation.signingKeySecretRef`            | break the tokens the instance minted                   |
+| `server.attachments.existingSecret` (`tokenSecretKey`, filesystem store) | `attachments.filesystem.tokenSecretRef` | void the attachment links handed out |
+
+The instance's pods read only Secrets labelled
+`notify.weebo.io/credential: "true"`: label every Secret it names, these
+and the database's and object store's.
+
+```bash
+kubectl -n notify label secret <secret>... notify.weebo.io/credential=true
+```
+
+## Values to fields
+
+| Chart value                                                   | `NotifyLocalInstance` field                                              |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `image.server`, `image.web`                                   | `image`, `web.image` (repository in `managedInstances.allowedImages`)    |
+| `server.replicaCount`, `web.replicaCount`                     | `replicas`, `web.replicas`                                               |
+| `server.database.existingSecret` + `secretKey`                | `database.urlSecretRef` (`name`, `key: database-url`)                    |
+| `server.attachments` (`kind: s3`): `endpoint`, `bucket`, `region` | `attachments.s3.endpoint`, `bucket`, `region`                        |
+| `server.attachments.existingSecret` + `accessKeyKey`/`secretKeyKey` | `attachments.s3.credentialsSecretRef` (`name`, `accessKeyIdKey: access-key`, `secretAccessKeyKey: secret-key`) |
+| `server.attachments` (`kind: filesystem`) + `persistence`     | `attachments.filesystem`                                                 |
+| `server.oidc`                                                 | `oidc` (`issuer`, `clientId`, `audiences`, `groupsClaim`)                |
+| `server.admin.oidcGroups`                                     | `admin.oidcGroups`                                                       |
+| `server.retention`                                            | `retention`                                                              |
+| `server.push.webpush` (`keyName: vapid.pem`, `contact`)       | `webPush` (`vapidKeySecretRef.key: vapid.pem`, `contact`)                |
+| `server.federation` (`keyName`, `audience`)                   | `federation` (`signingKeySecretRef`, `audience`)                         |
+| `server.sinks.smtp`                                           | `smtp` (`url`, `from`, `username`, `passwordSecretRef`, `permalinkBase`) |
+| `server.telemetry`                                            | `telemetry` (`otlpEndpoint`, `serviceName`, `sampleRatio`)               |
+| `server.channels.onRemoved`                                   | `channels.onRemoved` (`Archive`, `Delete`)                               |
+| `server.corsOrigins`                                          | `server.corsOrigins` (the web UI's origin is added for you)              |
+| `server.ingress.host`, `web.ingress.host`, `className`        | `ingress.api.host`, `ingress.web.host`, `ingress.className`              |
+| `server.serviceMonitor.enabled`                               | `serviceMonitor.enabled`                                                 |
+| `networkPolicy.ingressFrom`, `networkPolicy.egress`           | `networkPolicy.ingressFrom`, `networkPolicy.egressTo` (always on)        |
+| `server.extraConfig`, any other key (`push.apns`, …)          | `extraConfig`, minus what the CRs below own                              |
+
+`migrations.job`, `server.channels.reload` and the probes have no field:
+the operator runs the migrations itself, Notify reloads its file when it
+changes, and the probes are Notify's own. The chart's `prometheusRule`
+and `grafanaDashboard` have no equivalent yet: keep them as they were
+rendered by the chart.
+
+## `extraConfig` to CRs
+
+`extraConfig` may not hold `channels.managed`, `service_accounts`,
+`transforms` or `trust_policy`: each entry becomes a CR, its `id` the CR's
+name (or `spec.id`).
+
+| `config.toml`             | CR                     |
+| ------------------------- | ---------------------- |
+| `[[channels.managed]]`    | `NotifyChannel`        |
+| `[[service_accounts]]`    | `NotifyServiceAccount` |
+| `[[transforms]]`          | `NotifyTransform`      |
+| `[[trust_policy]]`        | `NotifyTrustPolicy`    |
+
+A channel sink's secret, a `env:`/`file:` reference in the file, becomes
+a `secretRef` to a labelled Secret of the channel's namespace.
+
+## The switch
+
+<Steps>
+
+<Step>
+**Install the operator** ([Install via Helm](/docs/guides/install)).
+</Step>
+
+<Step>
+**Apply the CRs of the objects first**, in the release's namespace. They
+wait for their instance (`InstanceNotFound`). Created before it, they are
+in its very first `config.toml`: Notify never sees a managed channel
+leave its configuration, which would archive it (or, with
+`onRemoved: Delete`, delete its history).
+</Step>
+
+<Step>
+**Stop the release**: `helm uninstall <release>` (the Secrets you created
+yourself stay; a PersistentVolumeClaim of a filesystem store keeps its
+data only with a retained volume — copy it to the claim the instance will
+use first). Two Notify on one database would both reconcile it.
+</Step>
+
+<Step>
+**Apply the `NotifyLocalInstance`**, named otherwise than the release's
+objects if any are left. The operator runs the migrations (already
+current: the Job ends at once), then the pods, then confirms the
+configuration. Each object turns `Ready`.
+</Step>
+
+</Steps>
+
+`reconcile.maxRemovals` (5 by default) still guards the switch: a
+configuration that would remove more channels or service accounts is
+applied without those removals, and the CRs say `RemovalRefused`.

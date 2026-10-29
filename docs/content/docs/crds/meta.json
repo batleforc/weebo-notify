@@ -1,0 +1,11 @@
+{
+  "title": "CRD reference",
+  "pages": [
+    "index",
+    "notifylocalinstance",
+    "notifychannel",
+    "notifyserviceaccount",
+    "notifytransform",
+    "notifytrustpolicy"
+  ]
+}

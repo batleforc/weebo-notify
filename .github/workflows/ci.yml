@@ -29,14 +29,27 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-mise
       - run: mise install
-      # The CRDs and their chart copies are committed and must never drift
-      # from the Rust types.
+      # The CRDs, their chart copies and the docs' generated pages are
+      # committed and must never drift from the Rust types.
       - run: mise exec -- task recu --force
       - name: Fail if committed generated files are stale
         run: |
-          git diff --exit-code deploy/
+          git diff --exit-code deploy/ docs/content/docs/crds/ docs/public/crd-schemas/ \
+            docs/content/docs/reference/
           # A generated file that's new must be committed too.
-          test -z "$(git status --porcelain deploy/crd deploy/charts/*/templates)"
+          test -z "$(git status --porcelain deploy/crd deploy/charts/*/templates docs/content/docs/crds/ docs/public/crd-schemas/ docs/content/docs/reference/)"
+
+  docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mise
+      - run: mise install node task
+      - run: mise exec -- task docs:build
 
   image-build:
     runs-on: ubuntu-latest
