@@ -70,6 +70,8 @@ toml = "1.1"
 url = "2"
 # Plain HTTP to the instances' pods (`/healthz`, in-cluster): the version
 # the kit's OTLP exporter already links.
+# The control plane of the integration tests (the kit's testkit uses it).
+envtest = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 
 [workspace.lints.rust]

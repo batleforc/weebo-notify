@@ -72,19 +72,23 @@ pub struct NotifyChannelSpec {
     #[schemars(range(min = 1))]
     pub publish_per_min: Option<u32>,
     /// Who holds which scopes. A `serviceAccount` names a service account
-    /// id of the same instance (a `NotifyServiceAccount`).
+    /// id of the same instance (a `NotifyServiceAccount`). At most 256.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 256))]
     pub access: Vec<Access>,
     /// CI jobs that may publish here with their forge's OIDC token: a
     /// trust policy scoped to this channel, taking priority over the
     /// instance's `NotifyTrustPolicy`s.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 64))]
     pub publishers: Vec<Publisher>,
-    /// Where every notification is also delivered.
+    /// Where every notification is also delivered. At most 16.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 16))]
     pub sinks: Vec<Sink>,
-    /// RSS, Atom and JSON feeds polled into the channel.
+    /// RSS, Atom and JSON feeds polled into the channel. At most 32.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 32))]
     #[schemars(extend("x-kubernetes-validations" = [
         {"rule": "self.all(f, self.exists_one(o, o.url == f.url))", "message": "a feed url appears once per channel"}
     ]))]
@@ -199,7 +203,7 @@ impl SinkType {
 pub struct Feed {
     /// http(s), no `user:pass@`. Changing it makes another feed, which
     /// primes again.
-    #[schemars(length(min = 1))]
+    #[schemars(length(min = 1, max = 2048))]
     pub url: String,
     /// The service account it publishes as: it must hold `publish` in this
     /// channel's `access`.

@@ -23,10 +23,11 @@ weebo-kit-runtime = { workspace = true }
 
 [dev-dependencies]
 application = { workspace = true, features = ["test-support"] }
+adapters-outbound = { workspace = true }
+testkit = { workspace = true }
+weebo-kit-adapters = { workspace = true }
 tokio = { workspace = true }
-
-# TODO(2e): the envtest controller tests (instance, objects, watch scope)
-# bring back their dev-dependencies (adapters-outbound, testkit, tokio…).
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

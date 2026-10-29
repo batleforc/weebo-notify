@@ -7,6 +7,9 @@ publish.workspace = true
 
 [dependencies]
 application = { workspace = true, features = ["test-support"] }
+envtest = { workspace = true }
+kube = { workspace = true }
+rustls = { workspace = true }
 weebo-kit-testkit = { workspace = true }
 
 [lints]

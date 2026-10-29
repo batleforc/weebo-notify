@@ -76,6 +76,12 @@ tasks:
   test:integration:
     desc: "Every test target, including the envtest integration tests under crates/*/tests"
     cmds:
+      # crates/adapters-inbound/tests: crds (the CRDs' rules, the admission
+      # on the cluster), controllers (end to end, the pods' /healthz in
+      # memory), watch_scope. With KUBEBUILDER_ASSETS set to a directory
+      # holding kube-apiserver/etcd/kubectl (e.g. setup-envtest's
+      # ~/.local/share/kubebuilder-envtest/k8s/<version>), nothing is
+      # downloaded; unset, the latest stable control plane is fetched once.
       - mise exec -- cargo test --workspace --tests --no-fail-fast
 
   test:all:

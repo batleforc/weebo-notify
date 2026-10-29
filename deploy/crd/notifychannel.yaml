@@ -45,7 +45,7 @@ spec:
               access:
                 description: |-
                   Who holds which scopes. A `serviceAccount` names a service account
-                  id of the same instance (a `NotifyServiceAccount`).
+                  id of the same instance (a `NotifyServiceAccount`). At most 256.
                 items:
                   description: One subject and the scopes it holds.
                   properties:
@@ -83,6 +83,7 @@ spec:
                   x-kubernetes-validations:
                   - message: an access binding names exactly one of oidcGroup, oidcSub, email and serviceAccount
                     rule: '[has(self.oidcGroup), has(self.oidcSub), has(self.email), has(self.serviceAccount)].filter(x, x).size() == 1'
+                maxItems: 256
                 type: array
               closeAfter:
                 description: |-
@@ -109,7 +110,7 @@ spec:
                 nullable: true
                 type: string
               feeds:
-                description: RSS, Atom and JSON feeds polled into the channel.
+                description: RSS, Atom and JSON feeds polled into the channel. At most 32.
                 items:
                   description: |-
                     A feed Notify's leader polls, publishing each new item as `publisher`.
@@ -149,12 +150,14 @@ spec:
                       description: |-
                         http(s), no `user:pass@`. Changing it makes another feed, which
                         primes again.
+                      maxLength: 2048
                       minLength: 1
                       type: string
                   required:
                   - publisher
                   - url
                   type: object
+                maxItems: 32
                 type: array
                 x-kubernetes-validations:
                 - message: a feed url appears once per channel
@@ -246,12 +249,13 @@ spec:
                   - scopes
                   - subject
                   type: object
+                maxItems: 64
                 type: array
               receipts:
                 description: Record who read each notification.
                 type: boolean
               sinks:
-                description: Where every notification is also delivered.
+                description: Where every notification is also delivered. At most 16.
                 items:
                   description: An outbound delivery of every notification of the channel.
                   properties:
@@ -294,6 +298,7 @@ spec:
                     rule: self.type != 'webhook' || (has(self.url) && has(self.secretRef) && !has(self.address))
                   - message: an email sink has an address only; the relay is the instance's smtp
                     rule: self.type != 'email' || (has(self.address) && !has(self.url) && !has(self.secretRef))
+                maxItems: 16
                 type: array
             type: object
           status:

@@ -6,6 +6,7 @@ version = 4
 name = "adapters-inbound"
 version = "0.1.0"
 dependencies = [
+ "adapters-outbound",
  "api",
  "application",
  "axum",
@@ -15,9 +16,12 @@ dependencies = [
  "opentelemetry",
  "serde",
  "serde_json",
+ "testkit",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "weebo-kit-adapters",
  "weebo-kit-api",
  "weebo-kit-application",
  "weebo-kit-runtime",
@@ -3666,6 +3670,9 @@ name = "testkit"
 version = "0.1.0"
 dependencies = [
  "application",
+ "envtest",
+ "kube",
+ "rustls",
  "weebo-kit-testkit",
 ]
 
