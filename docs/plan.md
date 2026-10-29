@@ -146,7 +146,7 @@ et n'entre pas dans la garde `max_removals`.
   l'instance accepte le namespace (`objectSelector.namespaces`) et le Secret
   porte le label `credential`.
 - Chaque release de l'opérateur fixe l'image notify par défaut
-  (`ghcr.io/batleforc/weebo-notify`, `-web`) au tag de sa dépendance
+  (`ghcr.io/batleforc/weebo-notify-v2`, `-v2-web`, taguées `vX.Y.Z`) au tag de sa dépendance
   `notify-config` et déclare une plage supportée ; hors plage :
   `UnsupportedVersion` (sauf `approved-upgrade`). Allow-list d'images par
   défaut : ces deux dépôts.
