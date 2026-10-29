@@ -237,8 +237,8 @@ spec:
                     type: string
                   repository:
                     description: |-
-                      Default: `ghcr.io/batleforc/weebo-notify` (the server),
-                      `ghcr.io/batleforc/weebo-notify-web` (the web UI).
+                      Default: `ghcr.io/batleforc/weebo-notify-v2` (the server),
+                      `ghcr.io/batleforc/weebo-notify-v2-web` (the web UI).
                     nullable: true
                     type: string
                   tag:
@@ -661,8 +661,8 @@ spec:
                         type: string
                       repository:
                         description: |-
-                          Default: `ghcr.io/batleforc/weebo-notify` (the server),
-                          `ghcr.io/batleforc/weebo-notify-web` (the web UI).
+                          Default: `ghcr.io/batleforc/weebo-notify-v2` (the server),
+                          `ghcr.io/batleforc/weebo-notify-v2-web` (the web UI).
                         nullable: true
                         type: string
                       tag:

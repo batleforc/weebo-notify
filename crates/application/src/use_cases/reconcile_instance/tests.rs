@@ -9,7 +9,7 @@ use crate::test_support::{
     FakeCredentials, FakeDirectory, FakeJobs, FakeKeys, FakeLedger, FakeReplicas,
 };
 
-const IMAGE: &str = "ghcr.io/batleforc/weebo-notify:0.3.0";
+const IMAGE: &str = "ghcr.io/batleforc/weebo-notify-v2:v0.3.1";
 
 fn spec(extra: serde_json::Value) -> LocalInstanceSpec {
     let mut base = json!({
@@ -93,7 +93,7 @@ impl Harness {
                 annotations: &self.annotations,
                 status,
                 default_image: IMAGE,
-                default_web_image: "ghcr.io/batleforc/weebo-notify-web:0.3.0",
+                default_web_image: "ghcr.io/batleforc/weebo-notify-v2-web:v0.3.1",
                 operator: &self.operator,
             },
             &InstancePorts {
@@ -188,8 +188,8 @@ async fn a_new_instance_is_migrated_before_its_server_starts() {
             .iter()
             .any(|(r, _)| *r == ReasonCode::ConfigApplied)
     );
-    assert_eq!(second.status.migrated_version.as_deref(), Some("0.3.0"));
-    assert_eq!(second.status.version.as_deref(), Some("0.3.0"));
+    assert_eq!(second.status.migrated_version.as_deref(), Some("v0.3.1"));
+    assert_eq!(second.status.version.as_deref(), Some("v0.3.1"));
     assert_eq!(second.status.available_replicas, Some(2));
     assert_eq!(h.server_image().as_deref(), Some(IMAGE));
     assert!(
@@ -237,7 +237,7 @@ async fn a_failed_migration_keeps_the_pods_on_their_version() {
     h.spec.image.tag = Some("0.4.0".into());
     h.annotations
         .insert(api::annotations::APPROVED_UPGRADE.into(), "0.4.0".into());
-    let target = "ghcr.io/batleforc/weebo-notify:0.4.0";
+    let target = "ghcr.io/batleforc/weebo-notify-v2:0.4.0";
     h.jobs.set(
         &workload::migrate_job("main", target),
         JobState {
@@ -248,7 +248,7 @@ async fn a_failed_migration_keeps_the_pods_on_their_version() {
     let report = h.pass(&migrated.status).await;
     assert_eq!(report.outcome.reason(), ReasonCode::MigrationFailed);
     assert_eq!(h.server_image().as_deref(), Some(IMAGE));
-    assert_eq!(report.status.migrated_version.as_deref(), Some("0.3.0"));
+    assert_eq!(report.status.migrated_version.as_deref(), Some("v0.3.1"));
     // The old Job is kept (its log), next to the new one.
     assert_eq!(h.objects.names("Job").len(), 2);
 }
@@ -308,7 +308,7 @@ async fn what_the_spec_no_longer_wants_is_removed() {
     h.spec.web.enabled = false;
     h.spec.replicas = 1;
     h.pass(&InstanceStatus {
-        migrated_version: Some("0.3.0".into()),
+        migrated_version: Some("v0.3.1".into()),
         ..Default::default()
     })
     .await;

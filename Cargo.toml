@@ -61,7 +61,7 @@ futures = "0.3"
 # what the operator renders is parsed and checked by Notify's own code.
 # Pinned on the Notify release whose images the operator defaults to
 # (`api::notify::VERSION`): move both together.
-notify-config = { git = "https://github.com/batleforc/weebo-notify-v2", tag = "v0.3.0" }
+notify-config = { git = "https://github.com/batleforc/weebo-notify-v2", tag = "v0.3.1" }
 # The `config.toml` the operator writes (the version notify-config uses).
 toml = "1.1"
 # Origins and ports of the URLs a spec names (the web UI's CSP, the

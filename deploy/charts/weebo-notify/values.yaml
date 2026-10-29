@@ -330,5 +330,5 @@ managedInstances:
   # runs pods with the namespace's labelled Secrets: keep this list to
   # Notify's own images (or your mirrors of them).
   allowedImages:
-    - ghcr.io/batleforc/weebo-notify
-    - ghcr.io/batleforc/weebo-notify-web
+    - ghcr.io/batleforc/weebo-notify-v2
+    - ghcr.io/batleforc/weebo-notify-v2-web

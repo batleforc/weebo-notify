@@ -27,7 +27,7 @@ mod common;
 
 use common::{POLL, TIMEOUT, cr, instance_spec, nudge, ready};
 
-const IMAGE: &str = "ghcr.io/batleforc/weebo-notify:0.3.0";
+const IMAGE: &str = "ghcr.io/batleforc/weebo-notify-v2:v0.3.1";
 
 async fn reason_is<K>(
     api: &Api<K>,
@@ -217,7 +217,7 @@ async fn an_instance_and_its_objects_run_end_to_end() {
     rolled_out(&client, "main").await;
     reason_is(&instances, "main", "ConfigPropagating", instance_conditions).await;
     let migrated = instances.get("main").await.unwrap().status.unwrap();
-    assert_eq!(migrated.migrated_version.as_deref(), Some("0.3.0"));
+    assert_eq!(migrated.migrated_version.as_deref(), Some("v0.3.1"));
 
     // ── The pods report the file: applied, the objects Ready ─────────────
     let first = digest(&instances, None).await;

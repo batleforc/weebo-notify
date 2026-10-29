@@ -57,13 +57,14 @@ pub mod kinds {
 /// versions.
 pub mod notify {
     /// The server's image repository.
-    pub const SERVER_IMAGE: &str = "ghcr.io/batleforc/weebo-notify";
+    pub const SERVER_IMAGE: &str = "ghcr.io/batleforc/weebo-notify-v2";
     /// The web UI's image repository.
-    pub const WEB_IMAGE: &str = "ghcr.io/batleforc/weebo-notify-web";
-    /// The version targeted: the default tag of both images.
-    pub const VERSION: &str = "0.3.0";
+    pub const WEB_IMAGE: &str = "ghcr.io/batleforc/weebo-notify-v2-web";
+    /// The version targeted: the default tag of both images, `v`-prefixed
+    /// as Notify's release tags them (the git tag).
+    pub const VERSION: &str = "v0.3.1";
     /// The tags an instance may run.
-    pub const SUPPORTED_VERSIONS: &[&str] = &["0.3.0"];
+    pub const SUPPORTED_VERSIONS: &[&str] = &["v0.3.1"];
 }
 
 pub use channel::Channel;

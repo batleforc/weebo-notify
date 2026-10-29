@@ -169,8 +169,8 @@ fn yes() -> bool {
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Image {
-    /// Default: `ghcr.io/batleforc/weebo-notify` (the server),
-    /// `ghcr.io/batleforc/weebo-notify-web` (the web UI).
+    /// Default: `ghcr.io/batleforc/weebo-notify-v2` (the server),
+    /// `ghcr.io/batleforc/weebo-notify-v2-web` (the web UI).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
     /// Default: the Notify version the operator targets.

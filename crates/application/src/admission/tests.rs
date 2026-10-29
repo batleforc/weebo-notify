@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use super::*;
 use crate::test_support::{FakeCredentials, FakeDirectory, FakeInstances};
 
-const IMAGE: &str = "ghcr.io/batleforc/weebo-notify:0.3.0";
-const WEB: &str = "ghcr.io/batleforc/weebo-notify-web:0.3.0";
+const IMAGE: &str = "ghcr.io/batleforc/weebo-notify-v2:v0.3.1";
+const WEB: &str = "ghcr.io/batleforc/weebo-notify-v2-web:v0.3.1";
 
 fn allowed() -> Vec<String> {
     vec![

@@ -301,8 +301,8 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(
             settings.default_image,
-            format!("ghcr.io/batleforc/weebo-notify:{}", api::notify::VERSION)
+            format!("ghcr.io/batleforc/weebo-notify-v2:{}", api::notify::VERSION)
         );
-        assert!(settings.default_web_image.contains("weebo-notify-web:"));
+        assert!(settings.default_web_image.contains("weebo-notify-v2-web:"));
     }
 }

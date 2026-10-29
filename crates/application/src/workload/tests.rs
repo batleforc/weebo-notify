@@ -59,9 +59,9 @@ impl Fixture {
             namespace: "team",
             spec: &self.spec,
             rendered: &self.rendered,
-            server_image: Some("ghcr.io/batleforc/weebo-notify:0.3.0"),
+            server_image: Some("ghcr.io/batleforc/weebo-notify-v2:v0.3.1"),
             migration: None,
-            web_image: "ghcr.io/batleforc/weebo-notify-web:0.3.0",
+            web_image: "ghcr.io/batleforc/weebo-notify-v2-web:v0.3.1",
             generated: &self.generated,
             sinks: &self.sinks,
             grow_claim: false,
@@ -96,7 +96,7 @@ fn the_server_runs_its_file_its_secrets_and_only_the_boot_hash_rolls_it() {
     );
     assert_eq!(
         annotations[IMAGE_ANNOTATION],
-        "ghcr.io/batleforc/weebo-notify:0.3.0"
+        "ghcr.io/batleforc/weebo-notify-v2:v0.3.1"
     );
     // The digest of the hot file is nowhere on the template.
     assert!(
@@ -157,7 +157,7 @@ fn the_server_runs_its_file_its_secrets_and_only_the_boot_hash_rolls_it() {
 #[test]
 fn a_pending_migration_runs_its_job_and_a_new_instance_waits_for_it() {
     let fixture = Fixture::new(json!({}));
-    let target = "ghcr.io/batleforc/weebo-notify:0.3.0";
+    let target = "ghcr.io/batleforc/weebo-notify-v2:v0.3.1";
     let input = WorkloadInput {
         server_image: None,
         migration: Some(target),
@@ -368,7 +368,7 @@ fn objects_with_growth(fixture: &Fixture) -> Vec<OwnedObject> {
 
 #[test]
 fn images_default_to_the_targeted_version() {
-    let default = "ghcr.io/batleforc/weebo-notify:0.3.0";
+    let default = "ghcr.io/batleforc/weebo-notify-v2:v0.3.1";
     assert_eq!(image(&Default::default(), default), default);
     let tagged = api::local_instance::Image {
         tag: Some("0.3.1".into()),
@@ -376,7 +376,7 @@ fn images_default_to_the_targeted_version() {
     };
     assert_eq!(
         image(&tagged, default),
-        "ghcr.io/batleforc/weebo-notify:0.3.1"
+        "ghcr.io/batleforc/weebo-notify-v2:0.3.1"
     );
     assert_eq!(tag("registry:5000/notify:0.3.0"), "0.3.0");
     assert_eq!(tag("registry:5000/notify"), "latest");
