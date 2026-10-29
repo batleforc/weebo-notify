@@ -405,3 +405,14 @@ fn the_api_origin_is_the_public_url_then_the_ingress_then_the_service() {
     fixture.spec.ingress = None;
     assert!(!api_origin(&fixture.input()).1);
 }
+
+#[test]
+fn the_objects_of_an_instance_are_the_golden_ones() {
+    let fixture = Fixture::new(json!({}));
+    let objects: Vec<Value> = objects(&fixture.input())
+        .into_iter()
+        .map(|o| o.manifest)
+        .collect();
+    let text = serde_json::to_string_pretty(&objects).unwrap() + "\n";
+    crate::golden::check("objects.json", &text);
+}

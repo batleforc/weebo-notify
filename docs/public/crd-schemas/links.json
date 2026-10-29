@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "kinds": {
+    "Database": {
+      "references": [],
+      "produces": []
+    },
+    "DnsName": {
+      "references": [],
+      "produces": []
+    },
+    "HttpEndpoint": {
+      "references": [],
+      "produces": []
+    },
+    "NotifyChannel": {
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        },
+        {
+          "path": "spec.sinks[].secretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "NotifyLocalInstance": {
+      "references": [
+        {
+          "path": "spec.attachments.filesystem.tokenSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.database.urlSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.federation.signingKeySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.sinks.fingerprintKeySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.sinks.previousFingerprintKeySecretRefs[]",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.smtp.passwordSecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.webPush.vapidKeySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "NotifyServiceAccount": {
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "NotifyTransform": {
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "NotifyTrustPolicy": {
+      "references": [
+        {
+          "path": "spec.instanceRef",
+          "to": [
+            {
+              "group": "notify.weebo.io",
+              "kind": "NotifyLocalInstance"
+            }
+          ]
+        }
+      ],
+      "produces": []
+    },
+    "OidcIssuer": {
+      "references": [],
+      "produces": []
+    },
+    "S3Bucket": {
+      "references": [],
+      "produces": []
+    },
+    "UpstreamRegistry": {
+      "references": [],
+      "produces": []
+    },
+    "VaultServer": {
+      "references": [],
+      "produces": []
+    }
+  }
+}

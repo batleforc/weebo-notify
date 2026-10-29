@@ -1,0 +1,13 @@
+{
+  "title": "weebo-notify",
+  "pages": [
+    "index",
+    "ide",
+    "---Getting started---",
+    "guides/install",
+    "guides/migrate-from-helm-chart",
+    "---Reference---",
+    "...crds",
+    "reference"
+  ]
+}

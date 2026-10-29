@@ -3,6 +3,8 @@ cocogitto = "latest"
 rust = { version = "latest", components = ["rust-src", "rustfmt", "llvm-tools", "clippy"], profile = "default" }
 task = "latest"
 gitleaks = "latest"
+# The docs site (docs/, @weebo/operator-docs)
+node = "24"
 # `task audit`
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 trivy = "latest"
@@ -19,3 +21,7 @@ actionlint = "latest"
 shellcheck = "latest"
 hadolint = "latest"
 helm = "latest"
+# The kind e2e (`task e2e`)
+kind = "latest"
+kubectl = "latest"
+jq = "latest"

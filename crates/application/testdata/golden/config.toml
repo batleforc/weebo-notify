@@ -1,0 +1,110 @@
+[admin]
+oidc_groups = ["notify-admins"]
+
+[attachments]
+bucket = "notify"
+endpoint = "http://rustfs:9000"
+kind = "s3"
+
+[channels]
+on_removed = "archive"
+
+[[channels.managed]]
+close_after = "0"
+default_priority = "high"
+default_ttl = "48h"
+id = "alerts"
+name = "Alerts"
+receipts = false
+
+[[channels.managed.access]]
+oidc_group = "ops"
+scopes = ["subscribe", "manage"]
+
+[[channels.managed.access]]
+scopes = ["publish"]
+service_account = "rss"
+
+[[channels.managed.feeds]]
+allow_private_network = false
+every = "1h"
+lang = "en"
+publisher = "rss"
+tags = ["blog"]
+url = "https://blog.example.com/feed.xml"
+
+[channels.managed.limits]
+publish_per_min = 120
+
+[[channels.managed.publishers]]
+issuer = "https://token.actions.githubusercontent.com"
+scopes = ["publish"]
+subject = "repo:acme/app:ref:refs/heads/main"
+
+[[channels.managed.sinks]]
+secret_ref = "file:/var/run/notify/sinks/sink-1bd1a0a11eb2e841"
+type = "webhook"
+url = "https://hooks.example.com/notify"
+
+[[channels.managed.sinks]]
+address = "oncall@example.com"
+type = "email"
+
+[database]
+max_connections = 20
+migrate_on_start = false
+
+[federation]
+signing_key_file = "/var/run/notify/federation/key"
+
+[oidc]
+client_id = "notify"
+issuer = "https://id.example"
+
+[push.webpush]
+contact = "mailto:ops@example.com"
+vapid_key_file = "/var/run/notify/vapid/key"
+
+[reconcile]
+allow_mass_removal = false
+max_removals = 5
+
+[retention]
+default_ttl = "30d"
+
+[server]
+bind = "0.0.0.0:8080"
+cors_origins = ["https://app.example.com"]
+
+[[service_accounts]]
+display_name = "RSS poller"
+id = "rss"
+
+[sinks.smtp]
+from = "notify@example.com"
+password_ref = "env:WNK_SMTP_PASSWORD"
+permalink_base = "https://app.example.com"
+url = "smtps://relay.example:465"
+username = "notify"
+
+[telemetry]
+otlp_endpoint = "http://collector:4318"
+sample_ratio = 0.5
+service_name = "main"
+
+[[transforms]]
+body = "body.message"
+channels = ["alerts", "dynamic"]
+id = "grafana"
+lang = "en"
+max_items = 10
+raw = "item"
+split = "body.alerts"
+title = "body.title"
+update = false
+
+[[trust_policy]]
+channels = ["alerts"]
+issuer = "https://token.actions.githubusercontent.com"
+scopes = ["publish"]
+subject = "repo:acme/app:ref:refs/heads/main"

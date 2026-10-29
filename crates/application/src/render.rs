@@ -1122,6 +1122,12 @@ mod tests {
     }
 
     #[test]
+    fn the_file_of_an_instance_and_one_of_each_object_is_the_golden_one() {
+        let rendered = render_with(&instance(), &objects(), &SecretStates::new()).unwrap();
+        crate::golden::check("config.toml", &rendered.text);
+    }
+
+    #[test]
     fn the_boot_hash_moves_with_what_notify_reads_at_boot_only() {
         let spec = instance();
         let base = render_with(&spec, &objects(), &SecretStates::new()).unwrap();

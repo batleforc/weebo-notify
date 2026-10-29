@@ -1,0 +1,91 @@
+---
+title: Install via Helm
+description: Bring up the operator with its chart, then a first instance.
+---
+
+The chart lives at `oci://ghcr.io/batleforc/charts/weebo-notify`. It
+needs [cert-manager](https://cert-manager.io) for the certificate of the
+operator's HTTPS server (probes and admission webhooks).
+
+```bash
+helm install weebo-notify \
+  oci://ghcr.io/batleforc/charts/weebo-notify \
+  --namespace weebo-notify --create-namespace \
+  --version <version>
+```
+
+The chart creates a self-signed issuer for that certificate. To use an
+issuer of yours, add `--set certManager.createIssuer=false --set
+certManager.issuerRef.name=<issuer>` (and `kind`, `ClusterIssuer` by
+default).
+
+## A first instance
+
+The database (PostgreSQL) and the object store (S3, or a volume with
+`attachments.filesystem`) are yours: the instance names the Secrets that
+reach them. Its pods read only Secrets labelled
+`notify.weebo.io/credential: "true"`.
+
+```bash
+kubectl -n team-a create secret generic notify-db \
+  --from-literal=url='postgres://notify:<password>@postgres:5432/notify'
+kubectl -n team-a create secret generic notify-s3 \
+  --from-literal=AWS_ACCESS_KEY_ID=<key> --from-literal=AWS_SECRET_ACCESS_KEY=<secret>
+kubectl -n team-a label secret notify-db notify-s3 notify.weebo.io/credential=true
+```
+
+```yaml
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyLocalInstance
+metadata:
+  name: notify
+  namespace: team-a
+spec:
+  database:
+    urlSecretRef: { name: notify-db, key: url }
+  attachments:
+    s3:
+      endpoint: https://s3.example.com
+      bucket: notify
+      credentialsSecretRef: { name: notify-s3 }
+  oidc:
+    issuer: https://id.example.com
+    clientId: notify
+```
+
+The operator runs Notify's migrations in a Job, then the server and the
+web UI. The keys it needs and you didn't name (the sink fingerprint key,
+the federation signing key) it generates, in Secrets of the instance.
+
+## Its objects
+
+A `NotifyChannel`, `NotifyServiceAccount`, `NotifyTransform` or
+`NotifyTrustPolicy` without `instanceRef` belongs to the only instance of
+its namespace. One of another namespace names the instance in
+`instanceRef`, and the instance accepts it with
+`objectSelector.namespaces` (`Same` by default, `All`, or a `Selector` of
+namespace labels).
+
+## Limited to one namespace
+
+`--set watch.namespace=<namespace>` limits the operator to the instances
+and objects of that namespace: its kinds move from the ClusterRole to a
+Role there. `watch.clusterKinds: false` (no ClusterRole at all) works the
+same, on the Role alone; a cluster admin then installs the CRDs
+(`crds.install: false`).
+
+## What an instance may run
+
+An instance runs only images whose repository is in
+`managedInstances.allowedImages` (default `ghcr.io/batleforc/weebo-notify-v2`
+and `ghcr.io/batleforc/weebo-notify-v2-web`). Add your mirror to the list:
+
+```bash
+helm upgrade weebo-notify oci://ghcr.io/batleforc/charts/weebo-notify \
+  --reuse-values \
+  --set 'managedInstances.allowedImages={registry.example.com/weebo-notify-v2,registry.example.com/weebo-notify-v2-web}'
+```
+
+Creating a `NotifyLocalInstance` still lets its author run Notify with
+the Secrets of the namespace labelled for it: give the kind as you give
+pods.

@@ -1,0 +1,22 @@
+# The instance of the kind e2e (deploy/e2e/run.sh), on deps.yaml. Its
+# images are the Notify release the operator targets. The Secrets it names
+# (db, s3, vapid) are created by run.sh.
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyLocalInstance
+metadata:
+  name: main
+  namespace: team
+spec:
+  database:
+    urlSecretRef: { name: db, key: url }
+  attachments:
+    s3:
+      endpoint: http://rustfs.notify-deps.svc.cluster.local:9000
+      bucket: notify
+      credentialsSecretRef: { name: s3 }
+  oidc:
+    issuer: http://dex.notify-deps.svc.cluster.local:5556/dex
+    clientId: weebo-notify
+  webPush:
+    vapidKeySecretRef: { name: vapid, key: key.pem }
+    contact: mailto:ops@e2e.local

@@ -1,0 +1,729 @@
+[
+  {
+    "apiVersion": "v1",
+    "data": {
+      "key": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2traw=="
+    },
+    "kind": "Secret",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "key",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify",
+        "notify.weebo.io/credential": "true"
+      },
+      "name": "main-fingerprint-key",
+      "namespace": "team"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "data": {
+      "config.toml": "[admin]\noidc_groups = []\n\n[attachments]\nbucket = \"notify\"\nendpoint = \"http://rustfs.storage:9000\"\nkind = \"s3\"\n\n[channels]\non_removed = \"archive\"\n\n[database]\nmigrate_on_start = false\n\n[oidc]\nclient_id = \"notify\"\nissuer = \"https://id.example.com/application/o/notify/\"\n\n[push.webpush]\ncontact = \"mailto:ops@example.com\"\nvapid_key_file = \"/var/run/notify/vapid/key\"\n\n[reconcile]\nallow_mass_removal = false\nmax_removals = 5\n\n[retention]\n\n[server]\nbind = \"0.0.0.0:8080\"\ncors_origins = [\"https://app.example.com\"]\n\n[sinks]\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "config",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main-config",
+      "namespace": "team"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "automountServiceAccountToken": false,
+    "kind": "ServiceAccount",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main",
+      "namespace": "team"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main",
+      "namespace": "team"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 8080,
+          "protocol": "TCP",
+          "targetPort": "http"
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/name": "notify"
+      }
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main",
+      "namespace": "team"
+    },
+    "spec": {
+      "progressDeadlineSeconds": 600,
+      "replicas": 2,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "server",
+          "app.kubernetes.io/instance": "main",
+          "app.kubernetes.io/name": "notify"
+        }
+      },
+      "strategy": {
+        "rollingUpdate": {
+          "maxSurge": 1,
+          "maxUnavailable": 0
+        },
+        "type": "RollingUpdate"
+      },
+      "template": {
+        "metadata": {
+          "annotations": {
+            "notify.weebo.io/boot-hash": "bdb14051c5b5b60e0e9656968dc54031a68495b727294c0b1f0394bfa4e2d35b",
+            "notify.weebo.io/image": "ghcr.io/batleforc/weebo-notify-v2:v0.3.1"
+          },
+          "labels": {
+            "app.kubernetes.io/component": "server",
+            "app.kubernetes.io/instance": "main",
+            "app.kubernetes.io/name": "notify",
+            "notify.weebo.io/server": "true"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "WNK_CONFIG",
+                  "value": "/etc/weebo-notify/config.toml"
+                },
+                {
+                  "name": "WNK_DATABASE__MIGRATE_ON_START",
+                  "value": "false"
+                },
+                {
+                  "name": "WNK_DATABASE__URL",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "url",
+                      "name": "db",
+                      "optional": false
+                    }
+                  }
+                },
+                {
+                  "name": "WNK_ATTACHMENTS__ACCESS_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "AWS_ACCESS_KEY_ID",
+                      "name": "s3",
+                      "optional": false
+                    }
+                  }
+                },
+                {
+                  "name": "WNK_ATTACHMENTS__SECRET_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "AWS_SECRET_ACCESS_KEY",
+                      "name": "s3",
+                      "optional": false
+                    }
+                  }
+                },
+                {
+                  "name": "WNK_SINKS__FINGERPRINT_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "key",
+                      "name": "main-fingerprint-key",
+                      "optional": false
+                    }
+                  }
+                }
+              ],
+              "image": "ghcr.io/batleforc/weebo-notify-v2:v0.3.1",
+              "imagePullPolicy": "IfNotPresent",
+              "lifecycle": {
+                "preStop": {
+                  "sleep": {
+                    "seconds": 5
+                  }
+                }
+              },
+              "livenessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": "http"
+                },
+                "periodSeconds": 10
+              },
+              "name": "server",
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "name": "http",
+                  "protocol": "TCP"
+                }
+              ],
+              "readinessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/readyz",
+                  "port": "http"
+                },
+                "periodSeconds": 10
+              },
+              "resources": {
+                "limits": {
+                  "memory": "512Mi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true
+              },
+              "startupProbe": {
+                "failureThreshold": 60,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": "http"
+                },
+                "periodSeconds": 5
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/etc/weebo-notify",
+                  "name": "config",
+                  "readOnly": true
+                },
+                {
+                  "mountPath": "/var/run/notify/vapid",
+                  "name": "secret-0",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "securityContext": {
+            "fsGroup": 65532,
+            "runAsGroup": 65532,
+            "runAsNonRoot": true,
+            "runAsUser": 65532,
+            "seccompProfile": {
+              "type": "RuntimeDefault"
+            }
+          },
+          "serviceAccountName": "main",
+          "volumes": [
+            {
+              "configMap": {
+                "name": "main-config"
+              },
+              "name": "config"
+            },
+            {
+              "name": "secret-0",
+              "secret": {
+                "items": [
+                  {
+                    "key": "key.pem",
+                    "path": "key"
+                  }
+                ],
+                "secretName": "vapid"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "policy/v1",
+    "kind": "PodDisruptionBudget",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main",
+      "namespace": "team"
+    },
+    "spec": {
+      "minAvailable": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "server",
+          "app.kubernetes.io/instance": "main",
+          "app.kubernetes.io/name": "notify"
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main",
+      "namespace": "team"
+    },
+    "spec": {
+      "egress": [
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ]
+        },
+        {
+          "ports": [
+            {
+              "port": 443,
+              "protocol": "TCP"
+            },
+            {
+              "port": 5432,
+              "protocol": "TCP"
+            },
+            {
+              "port": 9000,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "ingress": [
+        {
+          "ports": [
+            {
+              "port": "http",
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/instance": "main",
+          "app.kubernetes.io/name": "notify",
+          "notify.weebo.io/server": "true"
+        }
+      },
+      "policyTypes": [
+        "Ingress",
+        "Egress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "web",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main-web",
+      "namespace": "team"
+    },
+    "spec": {
+      "egress": [
+        {
+          "ports": [
+            {
+              "port": 53,
+              "protocol": "UDP"
+            },
+            {
+              "port": 53,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "ingress": [
+        {
+          "ports": [
+            {
+              "port": "http",
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "web",
+          "app.kubernetes.io/instance": "main",
+          "app.kubernetes.io/name": "notify"
+        }
+      },
+      "policyTypes": [
+        "Ingress",
+        "Egress"
+      ]
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "web",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main-web",
+      "namespace": "team"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "web",
+          "app.kubernetes.io/instance": "main",
+          "app.kubernetes.io/name": "notify"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/component": "web",
+            "app.kubernetes.io/instance": "main",
+            "app.kubernetes.io/name": "notify"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "WNK_API_BASE_URL",
+                  "value": "https://notify.example.com"
+                },
+                {
+                  "name": "WNK_OIDC_ISSUER",
+                  "value": "https://id.example.com/application/o/notify/"
+                },
+                {
+                  "name": "WNK_OIDC_CLIENT_ID",
+                  "value": "notify"
+                },
+                {
+                  "name": "WNK_ATTACHMENT_ORIGIN",
+                  "value": "http://rustfs.storage:9000"
+                }
+              ],
+              "image": "ghcr.io/batleforc/weebo-notify-v2-web:v0.3.1",
+              "imagePullPolicy": "IfNotPresent",
+              "livenessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": "http"
+                },
+                "periodSeconds": 10
+              },
+              "name": "web",
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "name": "http",
+                  "protocol": "TCP"
+                }
+              ],
+              "readinessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": "http"
+                },
+                "periodSeconds": 10
+              },
+              "resources": {
+                "limits": {
+                  "memory": "64Mi"
+                },
+                "requests": {
+                  "cpu": "10m",
+                  "memory": "16Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/usr/share/nginx/html",
+                  "name": "html",
+                  "readOnly": false
+                },
+                {
+                  "mountPath": "/etc/nginx/conf.d",
+                  "name": "nginx-conf",
+                  "readOnly": false
+                },
+                {
+                  "mountPath": "/var/cache/nginx",
+                  "name": "nginx-cache",
+                  "readOnly": false
+                },
+                {
+                  "mountPath": "/var/run",
+                  "name": "nginx-run",
+                  "readOnly": false
+                },
+                {
+                  "mountPath": "/tmp",
+                  "name": "tmp",
+                  "readOnly": false
+                }
+              ]
+            }
+          ],
+          "initContainers": [
+            {
+              "command": [
+                "/bin/sh",
+                "-c",
+                "cp -a /usr/share/nginx/html/. /seeded-html/"
+              ],
+              "image": "ghcr.io/batleforc/weebo-notify-v2-web:v0.3.1",
+              "imagePullPolicy": "IfNotPresent",
+              "name": "seed-html",
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": false
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/seeded-html",
+                  "name": "html",
+                  "readOnly": false
+                }
+              ]
+            }
+          ],
+          "securityContext": {
+            "fsGroup": 101,
+            "runAsGroup": 101,
+            "runAsNonRoot": true,
+            "runAsUser": 101,
+            "seccompProfile": {
+              "type": "RuntimeDefault"
+            }
+          },
+          "serviceAccountName": "main",
+          "volumes": [
+            {
+              "emptyDir": {},
+              "name": "html"
+            },
+            {
+              "emptyDir": {},
+              "name": "nginx-conf"
+            },
+            {
+              "emptyDir": {},
+              "name": "nginx-cache"
+            },
+            {
+              "emptyDir": {},
+              "name": "nginx-run"
+            },
+            {
+              "emptyDir": {},
+              "name": "tmp"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "web",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main-web",
+      "namespace": "team"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 8080,
+          "protocol": "TCP",
+          "targetPort": "http"
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "web",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/name": "notify"
+      }
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "server",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main",
+      "namespace": "team"
+    },
+    "spec": {
+      "ingressClassName": "nginx",
+      "rules": [
+        {
+          "host": "notify.example.com",
+          "http": {
+            "paths": [
+              {
+                "backend": {
+                  "service": {
+                    "name": "main",
+                    "port": {
+                      "name": "http"
+                    }
+                  }
+                },
+                "path": "/api/v1",
+                "pathType": "Prefix"
+              }
+            ]
+          }
+        }
+      ],
+      "tls": [
+        {
+          "hosts": [
+            "notify.example.com"
+          ],
+          "secretName": "notify-tls"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/component": "web",
+        "app.kubernetes.io/instance": "main",
+        "app.kubernetes.io/managed-by": "weebo-notify",
+        "app.kubernetes.io/name": "notify"
+      },
+      "name": "main-web",
+      "namespace": "team"
+    },
+    "spec": {
+      "ingressClassName": "nginx",
+      "rules": [
+        {
+          "host": "app.example.com",
+          "http": {
+            "paths": [
+              {
+                "backend": {
+                  "service": {
+                    "name": "main-web",
+                    "port": {
+                      "name": "http"
+                    }
+                  }
+                },
+                "path": "/",
+                "pathType": "Prefix"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+]
