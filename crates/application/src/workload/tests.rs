@@ -301,7 +301,10 @@ fn what_the_spec_no_longer_wants_is_removed() {
         );
     }
     // Without an Ingress, the UI points at the Service.
-    assert_eq!(api_origin(&input), "http://main.team.svc:8080");
+    assert_eq!(
+        api_origin(&input),
+        ("http://main.team.svc:8080".to_string(), false)
+    );
 }
 
 #[test]
@@ -381,4 +384,24 @@ fn images_default_to_the_targeted_version() {
         origin("https://id.example.com/a/b/"),
         Some("https://id.example.com".into())
     );
+}
+
+#[test]
+fn the_api_origin_is_the_public_url_then_the_ingress_then_the_service() {
+    let mut fixture = Fixture::new(json!({"server": {"publicUrl": "https://api.example.org/"}}));
+    assert_eq!(
+        api_origin(&fixture.input()),
+        ("https://api.example.org".to_string(), true)
+    );
+    let objects = objects(&fixture.input());
+    let web = &find(&objects, "Deployment", "main-web").unwrap().manifest;
+    let env = env_of(&web["spec"]["template"]["spec"]["containers"][0]);
+    assert_eq!(env["WNK_API_BASE_URL"]["value"], "https://api.example.org");
+    fixture.spec.server.public_url = None;
+    assert_eq!(
+        api_origin(&fixture.input()),
+        ("https://notify.example.com".to_string(), true)
+    );
+    fixture.spec.ingress = None;
+    assert!(!api_origin(&fixture.input()).1);
 }

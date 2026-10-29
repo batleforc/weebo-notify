@@ -14,7 +14,9 @@ use std::time::Instant;
 use api::LocalInstance;
 use api::status::ObjectStatus;
 use application::objects::ObjectKind;
-use application::use_cases::reconcile_object::{ObjectPass, reconcile_object, release_object};
+use application::use_cases::reconcile_object::{
+    ObjectPass, ReleasePass, reconcile_object, release_object,
+};
 use k8s_openapi::NamespaceResourceScope;
 use kube::api::Api;
 use kube::runtime::controller::Action;
@@ -119,11 +121,16 @@ async fn reconcile<K: BoundObject>(obj: Arc<K>, ctx: Arc<Ctx>) -> Result<Action,
         match event {
             Finalizer::Apply(object) => apply(&api, object.as_ref(), &ctx).await,
             Finalizer::Cleanup(object) => {
+                let name = object.name_any();
                 let released = release_object(
-                    K::KIND,
-                    &namespace,
-                    &object.name_any(),
-                    object.bound_instance(),
+                    ReleasePass {
+                        kind: K::KIND,
+                        namespace: &namespace,
+                        name: &name,
+                        spec_id: object.spec_id(),
+                        recorded: object.bound_instance(),
+                        orphaned: api::ANNOTATIONS.force_orphan(object.meta()),
+                    },
                     ctx.attached.as_ref(),
                 )
                 .await;

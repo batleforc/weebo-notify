@@ -397,6 +397,14 @@ fn instance_table(input: &Input<'_>) -> Result<toml::Table, Vec<String>> {
             })
         }
     };
+    // A mail's link is a web UI route (`<base>/n/<id>`): unset, the UI's
+    // own Ingress host when it has one.
+    let web_origin = spec
+        .ingress
+        .as_ref()
+        .and_then(|i| i.web.as_ref())
+        .filter(|_| spec.web.enabled)
+        .map(|web| format!("https://{}", web.host));
     let smtp = spec.smtp.as_ref().map(|s| {
         json!({
             "url": s.url,
@@ -404,7 +412,7 @@ fn instance_table(input: &Input<'_>) -> Result<toml::Table, Vec<String>> {
             "username": s.username,
             "password_ref": s.password_secret_ref.as_ref()
                 .map(|_| format!("env:{}", paths::SMTP_PASSWORD_ENV)),
-            "permalink_base": s.permalink_base,
+            "permalink_base": s.permalink_base.clone().or_else(|| web_origin.clone()),
         })
     });
     let push = spec.web_push.as_ref().map(
@@ -1306,5 +1314,31 @@ mod tests {
                     .to_string()
             )]
         );
+    }
+
+    #[test]
+    fn a_mail_links_to_the_web_ui_unless_the_spec_says_where() {
+        let rendered = render_with(&instance(), &[], &SecretStates::new()).unwrap();
+        let smtp = rendered.config.sinks.smtp.as_ref().unwrap();
+        assert_eq!(
+            smtp.permalink_base.as_deref(),
+            Some("https://app.example.com")
+        );
+        let mut s = instance();
+        if let Some(smtp) = s.smtp.as_mut() {
+            smtp.permalink_base = Some("https://mail-links.example.com".into());
+        }
+        let rendered = render_with(&s, &[], &SecretStates::new()).unwrap();
+        let smtp = rendered.config.sinks.smtp.as_ref().unwrap();
+        assert_eq!(
+            smtp.permalink_base.as_deref(),
+            Some("https://mail-links.example.com")
+        );
+        s.web.enabled = false;
+        if let Some(smtp) = s.smtp.as_mut() {
+            smtp.permalink_base = None;
+        }
+        let rendered = render_with(&s, &[], &SecretStates::new()).unwrap();
+        assert_eq!(rendered.config.sinks.smtp.unwrap().permalink_base, None);
     }
 }

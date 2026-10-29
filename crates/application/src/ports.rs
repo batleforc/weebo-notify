@@ -173,3 +173,34 @@ pub trait AttachedInstances: Send + Sync {
     async fn instance(&self, bound: &BoundInstance)
     -> Result<Option<api::LocalInstance>, ApiError>;
 }
+
+/// What one server pod's `/healthz` says of its configuration (ADR-0032).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppliedConfig {
+    /// The SHA-256 of the file it applied last (`None`: none yet).
+    pub digest: Option<String>,
+    /// What that file changes that only a restart applies, one line each.
+    pub pending_restart: Vec<String>,
+    /// The removals Notify's guard refused in its last pass.
+    pub refused_channels: Vec<String>,
+    pub refused_service_accounts: Vec<String>,
+}
+
+/// One ready server pod, and its answer (or why there is none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replica {
+    pub pod: String,
+    pub answer: Result<AppliedConfig, String>,
+}
+
+/// The server pods' own account of the configuration they run.
+#[async_trait::async_trait]
+pub trait ReplicaHealth: Send + Sync {
+    /// The ready pods of `namespace` matching `selector`, each asked its
+    /// `/healthz`: a pod that doesn't answer is said so, not dropped.
+    async fn replicas(
+        &self,
+        namespace: &str,
+        selector: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Vec<Replica>, ApiError>;
+}

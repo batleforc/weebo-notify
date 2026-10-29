@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use application::ports::{
     AttachedInstances, Credentials, InstanceDirectory, Jobs, KeyGenerator, ObjectDirectory,
-    OwnedObjects, StatusLedger,
+    OwnedObjects, ReplicaHealth, StatusLedger,
 };
 use application::use_cases::Outcome;
 use domain::Failure;
@@ -60,6 +60,8 @@ pub struct Ctx {
     pub ledger: Arc<dyn StatusLedger>,
     /// The migration `Job`s.
     pub jobs: Arc<dyn Jobs>,
+    /// The instances' server pods' `/healthz`.
+    pub health_checks: Arc<dyn ReplicaHealth>,
     /// The operator's own pods, let in by an instance's `NetworkPolicy`.
     pub operator: weebo_kit_application::workload::OperatorPod,
     /// The operator's own settings.
@@ -184,7 +186,10 @@ where
         action,
         err,
     );
-    if reason == ReasonCode::ConfigPropagating {
+    if matches!(
+        reason,
+        ReasonCode::ConfigPropagating | ReasonCode::RemovalRefused | ReasonCode::InstanceInUse
+    ) {
         Action::requeue(Duration::from_secs(15))
     } else {
         retry

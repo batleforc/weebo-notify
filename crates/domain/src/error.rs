@@ -69,6 +69,18 @@ weebo_kit_domain::reason_codes! {
         /// `serviceMonitor.enabled` but the cluster has no `ServiceMonitor`
         /// kind (no Prometheus operator): none is created (advisory).
         MonitoringUnavailable,
+        /// The instance is being deleted while channels, service accounts,
+        /// transforms or trust policies are still bound to it: it waits
+        /// for them.
+        InstanceInUse,
+        /// A pod reports a change only a restart applies although its boot
+        /// configuration is current: the operator's boot/hot split missed
+        /// a key (advisory; restart the pods to apply it).
+        RestartPending,
+        /// The web UI is on but nothing exposes the API to browsers (no
+        /// `server.publicUrl`, no `ingress`): the UI points at the
+        /// in-cluster `Service` (advisory).
+        ApiNotExposed,
         /// A Kubernetes API call of the operator itself failed (reading a
         /// CR or a Secret, applying an object, patching a status) —
         /// retried.
@@ -113,6 +125,8 @@ impl ReasonCode {
             ReasonCode::Reconciled
             | ReasonCode::ChannelNotManaged
             | ReasonCode::MonitoringUnavailable
+            | ReasonCode::RestartPending
+            | ReasonCode::ApiNotExposed
             | ReasonCode::ConfigApplied
             | ReasonCode::ConfigRolledOut
             | ReasonCode::Migrated
@@ -161,6 +175,8 @@ mod tests {
             [
                 &ReasonCode::Reconciled,
                 &ReasonCode::MonitoringUnavailable,
+                &ReasonCode::RestartPending,
+                &ReasonCode::ApiNotExposed,
                 &ReasonCode::ChannelNotManaged,
                 &ReasonCode::ConfigApplied,
                 &ReasonCode::ConfigRolledOut,

@@ -9,6 +9,7 @@
 //! ([`workload_settings`]).
 
 pub mod cluster;
+pub mod health;
 pub mod instances;
 pub mod jobs;
 pub mod ledger;
@@ -16,6 +17,7 @@ pub mod objects;
 
 use application::ports::ApiError;
 pub use cluster::{KubeCredentials, RandomKeys};
+pub use health::KubeReplicaHealth;
 pub use instances::LocalInstanceDirectory;
 pub use jobs::KubeJobs;
 pub use ledger::KubeInstanceLedger;

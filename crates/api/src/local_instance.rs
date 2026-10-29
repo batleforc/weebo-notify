@@ -359,9 +359,25 @@ pub struct Server {
     /// Serve the API reference at `/api/docs`. Notify: `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<bool>,
+    /// The API's external base URL, when something other than this
+    /// instance's `ingress` exposes it (a Gateway API route, an external
+    /// proxy): `https://notify.example.com`, an absolute http(s) URL with no
+    /// path. What the web UI calls. Unset: `https://<ingress.api.host>`, or
+    /// — no `ingress` either — the in-cluster `Service`, which browsers
+    /// can't reach (`ApiNotExposed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-kubernetes-validations" = [
+        {"rule": "self.matches('^https?://[^/?#@\\\\s]+/?$')", "message": "publicUrl is an absolute http(s) URL with no path, query or credentials: https://notify.example.com"}
+    ]))]
+    pub public_url: Option<String>,
 }
 
 impl Server {
+    /// [`Self::public_url`] without its trailing `/`.
+    pub fn public_origin(&self) -> Option<&str> {
+        self.public_url.as_deref().map(|u| u.trim_end_matches('/'))
+    }
+
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -381,8 +397,9 @@ pub struct Smtp {
     /// In a labelled `Secret`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password_secret_ref: Option<LocalSecretKeyRef>,
-    /// Where the instance is reachable, for the mail's link; unset, no
-    /// link.
+    /// The web UI's base URL, for the mail's link (`<base>/n/<id>`, a UI
+    /// route). Unset: `https://<ingress.web.host>` when the UI has an
+    /// `Ingress`, else no link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permalink_base: Option<String>,
 }
@@ -695,6 +712,17 @@ mod tests {
         assert!(rules.to_string().contains("DNS-1035"), "{rules}");
         let rules = &schema["properties"]["spec"]["x-kubernetes-validations"];
         assert!(rules.to_string().contains("S3 attachments"), "{rules}");
+    }
+
+    #[test]
+    fn the_public_url_is_checked_by_the_api_server() {
+        let crd = serde_json::to_value(LocalInstance::crd()).unwrap();
+        let field = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+            ["properties"]["server"]["properties"]["publicUrl"];
+        let rule = field["x-kubernetes-validations"][0]["rule"]
+            .as_str()
+            .unwrap();
+        assert_eq!(rule, r"self.matches('^https?://[^/?#@\\s]+/?$')");
     }
 
     #[test]

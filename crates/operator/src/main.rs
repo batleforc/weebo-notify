@@ -8,7 +8,8 @@ use std::time::Duration;
 use adapters_inbound::controller::{self, Ctx, Settings, Shutdown};
 use adapters_inbound::webhook;
 use adapters_outbound::{
-    KubeCredentials, KubeInstanceLedger, KubeJobs, KubeObjects, LocalInstanceDirectory, RandomKeys,
+    KubeCredentials, KubeInstanceLedger, KubeJobs, KubeObjects, KubeReplicaHealth,
+    LocalInstanceDirectory, RandomKeys,
 };
 use api::LocalInstance;
 use kube::Client;
@@ -131,6 +132,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         directory,
         ledger: Arc::new(KubeInstanceLedger::new(client.clone())),
         jobs: Arc::new(KubeJobs::new(client.clone())),
+        health_checks: Arc::new(KubeReplicaHealth::new(client.clone())?),
         operator,
         settings,
         recorder: Recorder::new(

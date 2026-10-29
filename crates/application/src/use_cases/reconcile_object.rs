@@ -114,35 +114,74 @@ async fn run(
     }
 }
 
-/// A deleted object's release (its finalizer): it waits until its instance
-/// re-rendered without it.
-///
-/// TODO(2c): until every pod applied that file, and — when Notify's guard
-/// refused the removal (`status.refusedRemovals`) — `RemovalRefused`.
+/// What a deleted object's release is about.
+#[derive(Debug, Clone, Copy)]
+pub struct ReleasePass<'a> {
+    pub kind: ObjectKind,
+    pub namespace: &'a str,
+    pub name: &'a str,
+    pub spec_id: Option<&'a str>,
+    pub recorded: Option<&'a BoundInstance>,
+    /// `notify.weebo.io/force-orphan: "true"`: released at once.
+    pub orphaned: bool,
+}
+
+/// A deleted object's release (its finalizer): once every pod of its
+/// instance applied a file without it. A channel or service account whose
+/// removal Notify's guard refused stays (`RemovalRefused`): its CR gone, it
+/// would stay managed with nothing to say so. Transforms and trust
+/// policies wait too: a trust policy removed must be confirmed revoked.
+/// Released at once when the instance is gone or being deleted (nothing
+/// will serve it), or the CR is force-orphaned.
 pub async fn release_object(
-    kind: ObjectKind,
-    namespace: &str,
-    name: &str,
-    recorded: Option<&BoundInstance>,
+    pass: ReleasePass<'_>,
     instances: &dyn AttachedInstances,
 ) -> Result<(), Failure> {
-    let Some(bound) = recorded else {
+    if pass.orphaned {
+        return Ok(());
+    }
+    let Some(bound) = pass.recorded else {
         return Ok(());
     };
     let Some(instance) = instances.instance(bound).await.map_err(api_failure)? else {
         return Ok(());
     };
+    if instance.metadata.deletion_timestamp.is_some() {
+        return Ok(());
+    }
     let status = instance.status.unwrap_or_default();
+    let id = id_of(pass.kind, pass.name, pass.spec_id).unwrap_or_default();
+    let refused = match pass.kind {
+        ObjectKind::Channel => status.refused_removals.channels.contains(&id),
+        ObjectKind::ServiceAccount => status.refused_removals.service_accounts.contains(&id),
+        ObjectKind::Transform | ObjectKind::TrustPolicy => false,
+    };
+    if refused {
+        return Err(Failure::new(
+            ReasonCode::RemovalRefused,
+            format!(
+                "Notify's guard on {bound} refused removing the {} {id}: more removals at once \
+                 than its reconcile.maxRemovals. Set reconcile.allowMassRemoval on the instance \
+                 (then unset it), or remove fewer objects at a time",
+                pass.kind.noun()
+            ),
+        ));
+    }
     if status
         .objects
-        .contains_key(&object_key(kind.kind(), namespace, name))
+        .contains_key(&object_key(pass.kind.kind(), pass.namespace, pass.name))
     {
-        Err(Failure::new(
+        return Err(Failure::new(
             ReasonCode::ConfigPropagating,
             format!("waiting for {bound} to render without it"),
-        ))
-    } else {
-        Ok(())
+        ));
+    }
+    match (&status.applied_config_digest, &status.config_digest) {
+        (Some(applied), Some(written)) if applied == written => Ok(()),
+        _ => Err(Failure::new(
+            ReasonCode::ConfigPropagating,
+            format!("waiting for every pod of {bound} to apply its file without it"),
+        )),
     }
 }
 
@@ -236,30 +275,112 @@ mod tests {
         );
     }
 
+    fn release<'a>(
+        kind: ObjectKind,
+        bound: Option<&'a BoundInstance>,
+        orphaned: bool,
+    ) -> ReleasePass<'a> {
+        ReleasePass {
+            kind,
+            namespace: "team",
+            name: "alerts",
+            spec_id: None,
+            recorded: bound,
+            orphaned,
+        }
+    }
+
+    fn dropped(applied: Option<&str>) -> FakeInstances {
+        FakeInstances::with_status(InstanceStatus {
+            config_digest: Some("d2".into()),
+            applied_config_digest: applied.map(String::from),
+            ..Default::default()
+        })
+    }
+
     #[tokio::test]
-    async fn a_deleted_object_waits_for_its_instance_to_drop_it() {
+    async fn a_deleted_object_waits_for_a_file_without_it_applied() {
         let bound = BoundInstance::local("team", "main");
+        let channel = release(ObjectKind::Channel, Some(&bound), false);
         let still = instances(Some(render(RenderState::Rendered, true)));
-        let waiting = release_object(ObjectKind::Channel, "team", "alerts", Some(&bound), &still)
+        let waiting = release_object(channel, &still).await.unwrap_err();
+        assert_eq!(waiting.reason, ReasonCode::ConfigPropagating);
+        // Out of the file, which the pods haven't all applied yet.
+        let written = release_object(channel, &dropped(Some("d1"))).await;
+        assert_eq!(written.unwrap_err().reason, ReasonCode::ConfigPropagating);
+        assert!(release_object(channel, &dropped(None)).await.is_err());
+        // Applied: released.
+        assert!(release_object(channel, &dropped(Some("d2"))).await.is_ok());
+        // Never bound, or the instance gone.
+        let none = release(ObjectKind::Channel, None, false);
+        assert!(release_object(none, &still).await.is_ok());
+        assert!(
+            release_object(channel, &FakeInstances::default())
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_removal_keeps_the_finalizer_until_a_later_pass() {
+        let bound = BoundInstance::local("team", "main");
+        let refused = |channels: &[&str], accounts: &[&str]| {
+            FakeInstances::with_status(InstanceStatus {
+                config_digest: Some("d2".into()),
+                applied_config_digest: Some("d2".into()),
+                refused_removals: api::status::RefusedRemovals {
+                    channels: channels.iter().map(|c| c.to_string()).collect(),
+                    service_accounts: accounts.iter().map(|c| c.to_string()).collect(),
+                },
+                ..Default::default()
+            })
+        };
+        let channel = release(ObjectKind::Channel, Some(&bound), false);
+        let kept = release_object(channel, &refused(&["alerts"], &[]))
             .await
             .unwrap_err();
-        assert_eq!(waiting.reason, ReasonCode::ConfigPropagating);
-        let dropped = instances(None);
+        assert_eq!(kept.reason, ReasonCode::RemovalRefused);
+        assert!(
+            kept.message.contains("allowMassRemoval"),
+            "{}",
+            kept.message
+        );
+        // The ids are per kind: a service account `alerts` is not this.
+        assert!(
+            release_object(channel, &refused(&[], &["alerts"]))
+                .await
+                .is_ok()
+        );
+        let account = release(ObjectKind::ServiceAccount, Some(&bound), false);
+        assert_eq!(
+            release_object(account, &refused(&[], &["alerts"]))
+                .await
+                .unwrap_err()
+                .reason,
+            ReasonCode::RemovalRefused
+        );
+        // A later pass the guard allows empties the list: released.
+        assert!(release_object(channel, &refused(&[], &[])).await.is_ok());
+        // Force-orphaned: released whatever Notify says.
+        let orphaned = release(ObjectKind::Channel, Some(&bound), true);
+        assert!(
+            release_object(orphaned, &refused(&["alerts"], &[]))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_instance_being_deleted_releases_its_objects() {
+        let bound = BoundInstance::local("team", "main");
+        let deleting = FakeInstances::deleting(InstanceStatus::default());
         assert!(
             release_object(
-                ObjectKind::Channel,
-                "team",
-                "alerts",
-                Some(&bound),
-                &dropped
+                release(ObjectKind::TrustPolicy, Some(&bound), false),
+                &deleting
             )
             .await
             .is_ok()
-        );
-        assert!(
-            release_object(ObjectKind::Channel, "team", "alerts", None, &still)
-                .await
-                .is_ok()
         );
     }
 }

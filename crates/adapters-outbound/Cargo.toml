@@ -18,6 +18,8 @@ weebo-kit-adapters = { workspace = true }
 weebo-kit-application = { workspace = true }
 weebo-kit-api = { workspace = true }
 weebo-kit-runtime = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
 # Generated keys (the fingerprint key, the filesystem link key).
 getrandom = "0.3"
 base64 = "0.22"

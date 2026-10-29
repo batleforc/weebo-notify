@@ -154,6 +154,18 @@ impl FakeInstances {
             instance: Mutex::new(Some(instance)),
         }
     }
+
+    /// [`Self::with_status`], the instance being deleted.
+    pub fn deleting(status: InstanceStatus) -> Self {
+        let fake = Self::with_status(status);
+        if let Some(instance) = fake.instance.lock().unwrap().as_mut() {
+            instance.metadata.deletion_timestamp =
+                Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+                    k8s_openapi::jiff::Timestamp::UNIX_EPOCH,
+                ));
+        }
+        fake
+    }
 }
 
 #[async_trait::async_trait]
@@ -227,5 +239,44 @@ impl crate::ports::KeyGenerator for FakeKeys {
             "-----BEGIN PRIVATE KEY-----\nfake{}\n-----END PRIVATE KEY-----\n",
             self.next()
         )
+    }
+}
+
+/// The server pods' answers, as the test sets them: by default, every
+/// pod the `Deployment` counts applied the digest given to [`Self::apply`].
+#[derive(Default)]
+pub struct FakeReplicas {
+    replicas: Mutex<Vec<crate::ports::Replica>>,
+}
+
+impl FakeReplicas {
+    /// `pods` pods, each having applied `digest`.
+    pub fn apply(&self, pods: usize, digest: &str) {
+        self.set(
+            (0..pods)
+                .map(|i| crate::ports::Replica {
+                    pod: format!("main-{i}"),
+                    answer: Ok(crate::ports::AppliedConfig {
+                        digest: Some(digest.into()),
+                        ..Default::default()
+                    }),
+                })
+                .collect(),
+        );
+    }
+
+    pub fn set(&self, replicas: Vec<crate::ports::Replica>) {
+        *self.replicas.lock().unwrap() = replicas;
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ports::ReplicaHealth for FakeReplicas {
+    async fn replicas(
+        &self,
+        _namespace: &str,
+        _selector: &BTreeMap<String, String>,
+    ) -> Result<Vec<crate::ports::Replica>, ApiError> {
+        Ok(self.replicas.lock().unwrap().clone())
     }
 }

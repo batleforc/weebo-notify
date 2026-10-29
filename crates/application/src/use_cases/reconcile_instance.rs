@@ -17,25 +17,28 @@
 //!    kit), the digest and boot hash recorded at once; the
 //!    `ServiceMonitor` apart (no such kind: `MonitoringUnavailable`); what
 //!    the spec no longer wants removed, old migration `Job`s pruned;
-//! 8. `Ready` once the server's pods all run the target image and boot
-//!    hash (`WorkloadNotReady`).
-//!
-//! TODO(2c): the configuration's confirmation, pod by pod, from `/healthz`
-//! (ADR-0032): `appliedConfigDigest`, each object's `appliedGeneration`,
-//! the refused removals.
+//! 8. the server's pods all run the target image and boot hash
+//!    (`WorkloadNotReady`);
+//! 9. the configuration's confirmation from the pods' `/healthz`
+//!    ([`crate::confirm`], ADR-0032): `appliedConfigDigest` and each
+//!    object's `appliedGeneration` once every ready pod applied the file
+//!    (`ConfigPropagating` until then), the refused removals
+//!    (`RemovalRefused`), a restart the boot hash missed
+//!    (`RestartPending`). `Ready` = migrated, rolled out and applied.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use api::local_instance::{LocalInstanceSpec, Names};
-use api::status::InstanceStatus;
+use api::status::{InstanceStatus, RefusedRemovals, RenderState};
 use domain::error::ReasonCode;
 use domain::{Advisory, Failure};
 use weebo_kit_application::workload::{OperatorPod, stale};
 
 use super::{Outcome, api_failure, credential_failure, workload_failure};
+use crate::confirm::{Confirmation, confirm};
 use crate::ports::{
     CredentialError, Credentials, Jobs, KeyGenerator, ObjectDirectory, OwnedObjects, Owner,
-    StatusLedger, WorkloadError,
+    ReplicaHealth, StatusLedger, WorkloadError,
 };
 use crate::render::{self, Input, Rendered, SecretState, SecretStates, paths};
 use crate::workload::{self, WorkloadInput};
@@ -66,6 +69,8 @@ pub struct InstancePorts<'a> {
     pub directory: &'a dyn ObjectDirectory,
     pub jobs: &'a dyn Jobs,
     pub keys: &'a dyn KeyGenerator,
+    /// The server pods' `/healthz`.
+    pub health: &'a dyn ReplicaHealth,
 }
 
 /// A pass's result: the `Ready` outcome, the status to publish, the Events
@@ -370,6 +375,14 @@ async fn run(
         .apply(owner, &workload::objects(&input))
         .await
         .map_err(workload_failure)?;
+    if spec.web.enabled && !workload::api_origin(&input).1 {
+        advisories.push(Advisory {
+            reason: ReasonCode::ApiNotExposed,
+            message: "the web UI is on but nothing exposes the API to browsers: set \
+                      server.publicUrl (a Gateway, a proxy) or ingress"
+                .into(),
+        });
+    }
     status.config_digest = Some(rendered.config_digest.clone());
     status.boot_hash = Some(rendered.boot_hash.clone());
     ports
@@ -437,6 +450,24 @@ async fn run(
     {
         status.version = Some(workload::tag(image).to_string());
     }
+
+    // 9. What the pods applied: the file, each object's generation in it,
+    // the removals Notify's guard refused.
+    let mut waiting = None;
+    if rollout.is_some() {
+        let replicas = ports
+            .health
+            .replicas(&owner.namespace, &workload::selector(&owner.name, "server"))
+            .await
+            .map_err(api_failure)?;
+        let pods = confirm(
+            &rendered.config_digest,
+            &replicas,
+            status.available_replicas.unwrap_or_default(),
+        );
+        apply_confirmation(&rendered, &pods, on_target, status, advisories, events);
+        waiting = pods.waiting;
+    }
     match migration {
         Migration::Failed(why) => Err(Failure::new(
             ReasonCode::MigrationFailed,
@@ -450,9 +481,17 @@ async fn run(
             ReasonCode::Migrating,
             format!("the database is being migrated to Notify {target_tag} ({job})"),
         )),
-        Migration::Done if on_target => Ok(format!(
-            "Notify {target_tag} runs on {} pod(s)",
+        Migration::Done if on_target && waiting.is_none() => Ok(format!(
+            "Notify {target_tag} runs the configuration on {} pod(s)",
             status.available_replicas.unwrap_or_default()
+        )),
+        Migration::Done if on_target => Err(Failure::new(
+            ReasonCode::ConfigPropagating,
+            format!(
+                "configuration written to {}, waiting for the pods to load it: {}",
+                names.config(),
+                waiting.unwrap_or_default()
+            ),
         )),
         Migration::Done => Err(Failure::new(
             ReasonCode::WorkloadNotReady,
@@ -462,6 +501,113 @@ async fn run(
                 spec.replicas
             ),
         )),
+    }
+}
+
+/// A deleted instance's release (its finalizer): it waits while live
+/// objects are still bound to it — its owned objects then go with it
+/// (owner references). Force-orphaned: released at once.
+pub async fn release_instance(
+    owner: &Owner,
+    spec: &LocalInstanceSpec,
+    orphaned: bool,
+    directory: &dyn ObjectDirectory,
+) -> Result<(), Failure> {
+    if orphaned {
+        return Ok(());
+    }
+    let bound: Vec<String> = directory
+        .bound_to(owner, &spec.object_selector)
+        .await
+        .map_err(api_failure)?
+        .into_iter()
+        .filter(|v| !v.deleting)
+        .map(|v| v.key())
+        .collect();
+    if bound.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<&str> = bound.iter().take(5).map(String::as_str).collect();
+    let more = bound.len().saturating_sub(shown.len());
+    Err(Failure::new(
+        ReasonCode::InstanceInUse,
+        format!(
+            "{} object(s) still bound to it: {}{}. Delete them (or annotate the instance {}: \
+             \"true\" to leave them)",
+            bound.len(),
+            shown.join(", "),
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            },
+            api::ANNOTATIONS.key(weebo_kit_api::annotations::FORCE_ORPHAN)
+        ),
+    ))
+}
+
+/// What the pods said, into the status: the applied digest and the
+/// generations it holds once every pod runs the file (a `ConfigApplied`
+/// Event once per digest), the refused removals, what only a restart
+/// applies although the boot configuration is current.
+fn apply_confirmation(
+    rendered: &Rendered,
+    pods: &Confirmation,
+    on_target: bool,
+    status: &mut InstanceStatus,
+    advisories: &mut Vec<Advisory>,
+    events: &mut Vec<(ReasonCode, String)>,
+) {
+    status.refused_removals = RefusedRemovals {
+        channels: pods.refused_channels.clone(),
+        service_accounts: pods.refused_service_accounts.clone(),
+    };
+    if !status.refused_removals.is_empty() {
+        let ids: Vec<String> = pods
+            .refused_channels
+            .iter()
+            .map(|id| format!("channel {id}"))
+            .chain(
+                pods.refused_service_accounts
+                    .iter()
+                    .map(|id| format!("service account {id}")),
+            )
+            .collect();
+        advisories.push(Advisory {
+            reason: ReasonCode::RemovalRefused,
+            message: format!(
+                "Notify's guard refused removing {} (more than reconcile.maxRemovals at once): \
+                 they stay managed until reconcile.allowMassRemoval is set or fewer are removed",
+                ids.join(", ")
+            ),
+        });
+    }
+    if on_target && !pods.pending_restart.is_empty() {
+        advisories.push(Advisory {
+            reason: ReasonCode::RestartPending,
+            message: format!(
+                "the pods run the current boot configuration but report what only a restart \
+                 applies: {} (restart them: kubectl rollout restart)",
+                pods.pending_restart.join("; ")
+            ),
+        });
+    }
+    if pods.applied {
+        if status.applied_config_digest.as_deref() != Some(rendered.config_digest.as_str()) {
+            events.push((
+                ReasonCode::ConfigApplied,
+                format!(
+                    "every pod applied the configuration {}",
+                    rendered.config_digest.get(..12).unwrap_or_default()
+                ),
+            ));
+        }
+        status.applied_config_digest = Some(rendered.config_digest.clone());
+        for render in status.objects.values_mut() {
+            if render.state == RenderState::Rendered {
+                render.applied_generation = render.generation;
+            }
+        }
     }
 }
 

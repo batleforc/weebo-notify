@@ -477,16 +477,24 @@ fn port_of(text: &str) -> Option<u16> {
     })
 }
 
-/// Where the browser reaches the API: its `Ingress` host, or (no
-/// `Ingress`) the `Service`, for a UI reached through a port-forward.
-pub fn api_origin(input: &WorkloadInput<'_>) -> String {
-    match &input.spec.ingress {
-        Some(ingress) => format!("https://{}", ingress.api.host),
-        None => format!(
-            "http://{}.{}.svc:{}",
-            Names(input.name).server(),
-            input.namespace,
-            paths::PORT
+/// Where the browser reaches the API, and whether it can: (1)
+/// `server.publicUrl`, (2) the `Ingress` host, (3) the in-cluster
+/// `Service`, reached by a browser only through a port-forward.
+pub fn api_origin(input: &WorkloadInput<'_>) -> (String, bool) {
+    let spec = input.spec;
+    if let Some(public) = spec.server.public_origin() {
+        return (public.to_string(), true);
+    }
+    match &spec.ingress {
+        Some(ingress) => (format!("https://{}", ingress.api.host), true),
+        None => (
+            format!(
+                "http://{}.{}.svc:{}",
+                Names(input.name).server(),
+                input.namespace,
+                paths::PORT
+            ),
+            false,
         ),
     }
 }
@@ -495,7 +503,7 @@ fn web_deployment(input: &WorkloadInput<'_>) -> Deployment {
     let spec = input.spec;
     // ADR-0021: rendered into /env.js and the CSP at boot.
     let mut env = vec![
-        value("WNK_API_BASE_URL", &api_origin(input)),
+        value("WNK_API_BASE_URL", &api_origin(input).0),
         // The issuer as the server checks it: the UI discovers it (its
         // origin is derived for the CSP by the image).
         value("WNK_OIDC_ISSUER", &spec.oidc.issuer),

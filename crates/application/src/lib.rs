@@ -2,6 +2,7 @@
 //! Kubernetes client here: adapters implement [`ports`] in
 //! `adapters-outbound`, `operator::main` injects them.
 
+pub mod confirm;
 pub mod objects;
 pub mod ports;
 pub mod render;

@@ -511,6 +511,19 @@ spec:
                     description: 'Serve the API reference at `/api/docs`. Notify: `true`.'
                     nullable: true
                     type: boolean
+                  publicUrl:
+                    description: |-
+                      The API's external base URL, when something other than this
+                      instance's `ingress` exposes it (a Gateway API route, an external
+                      proxy): `https://notify.example.com`, an absolute http(s) URL with no
+                      path. What the web UI calls. Unset: `https://<ingress.api.host>`, or
+                      — no `ingress` either — the in-cluster `Service`, which browsers
+                      can't reach (`ApiNotExposed`).
+                    nullable: true
+                    type: string
+                    x-kubernetes-validations:
+                    - message: 'publicUrl is an absolute http(s) URL with no path, query or credentials: https://notify.example.com'
+                      rule: self.matches('^https?://[^/?#@\\s]+/?$')
                 type: object
               serviceMonitor:
                 default:
@@ -587,8 +600,9 @@ spec:
                     type: object
                   permalinkBase:
                     description: |-
-                      Where the instance is reachable, for the mail's link; unset, no
-                      link.
+                      The web UI's base URL, for the mail's link (`<base>/n/<id>`, a UI
+                      route). Unset: `https://<ingress.web.host>` when the UI has an
+                      `Ingress`, else no link.
                     nullable: true
                     type: string
                   url:

@@ -14,7 +14,7 @@ use std::time::Instant;
 use api::LocalInstance;
 use application::ports::Owner;
 use application::use_cases::reconcile_instance::{
-    InstancePass, InstancePorts, reconcile_instance, status_fields,
+    InstancePass, InstancePorts, reconcile_instance, release_instance, status_fields,
 };
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::Job;
@@ -123,6 +123,14 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
     super::drive(KIND, health, results).await;
 }
 
+fn owner_of(instance: &LocalInstance) -> Owner {
+    Owner {
+        namespace: instance.namespace().unwrap_or_default(),
+        name: instance.name_any(),
+        uid: instance.uid().unwrap_or_default(),
+    }
+}
+
 async fn reconcile(obj: Arc<LocalInstance>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     let namespace = obj.namespace().unwrap_or_default();
     let api: Api<LocalInstance> = Api::namespaced(ctx.client.clone(), &namespace);
@@ -130,9 +138,37 @@ async fn reconcile(obj: Arc<LocalInstance>, ctx: Arc<Ctx>) -> Result<Action, Err
         match event {
             Finalizer::Apply(instance) => apply(&api, &instance, &ctx).await,
             Finalizer::Cleanup(instance) => {
-                // Its objects go with it (owner references): nothing to
-                // undo. TODO(2c): hold it while objects are bound to it.
-                super::finalize(instance.as_ref(), &ctx, async { Ok(()) }).await
+                // Held while live objects are bound to it; its own objects
+                // then go with it (owner references).
+                let owner = owner_of(&instance);
+                let released = release_instance(
+                    &owner,
+                    &instance.spec,
+                    api::ANNOTATIONS.force_orphan(instance.meta()),
+                    ctx.directory.as_ref(),
+                )
+                .await;
+                if let Err(failure) = &released {
+                    // Said on the instance too, not only in an Event.
+                    let previous = instance.status.clone().unwrap_or_default();
+                    weebo_kit_runtime::status::publish(
+                        &api,
+                        &ctx.recorder,
+                        super::FIELD_MANAGER,
+                        instance.as_ref(),
+                        &previous.conditions,
+                        StatusUpdate {
+                            ready: &Err(failure.clone()),
+                            advisories: &[],
+                            fields: serde_json::Map::new(),
+                        },
+                    )
+                    .await?;
+                }
+                super::finalize(instance.as_ref(), &ctx, async {
+                    released.map_err(Error::Cleanup)
+                })
+                .await
             }
         }
     })
@@ -146,11 +182,7 @@ async fn apply(
     ctx: &Ctx,
 ) -> Result<Action, Error> {
     let started = Instant::now();
-    let owner = Owner {
-        namespace: instance.namespace().unwrap_or_default(),
-        name: instance.name_any(),
-        uid: instance.uid().unwrap_or_default(),
-    };
+    let owner = owner_of(instance);
     let previous = instance.status.clone().unwrap_or_default();
     let report = reconcile_instance(
         InstancePass {
@@ -169,6 +201,7 @@ async fn apply(
             directory: ctx.directory.as_ref(),
             jobs: ctx.jobs.as_ref(),
             keys: ctx.keys.as_ref(),
+            health: ctx.health_checks.as_ref(),
         },
     )
     .await;

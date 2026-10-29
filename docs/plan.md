@@ -70,10 +70,17 @@ external : sans API admin il n'aurait rien à piloter ; pas de
 - Ingress API et web (host, classe, Secret TLS, annotations). HTTPRoute
   plus tard. L'Ingress API ne route que `/api/v1` (ni `/healthz`, ni
   `/readyz`, ni `/metrics`).
-- URL publique de l'API (`WNK_API_BASE_URL` du web, `permalinkBase` par
-  défaut) : `spec.server.publicUrl` si fourni (Gateway API, proxy externe),
-  sinon l'hôte de `ingress.api`, sinon l'URL du Service avec un avis : le
-  navigateur n'atteint pas l'API.
+- URL publique de l'API (`WNK_API_BASE_URL` du web) :
+  `spec.server.publicUrl` si fourni (Gateway API, proxy externe), sinon
+  l'hôte de `ingress.api`, sinon l'URL du Service avec l'avis
+  `ApiNotExposed`. Le lien des mails (`smtp.permalinkBase`, `<base>/n/<id>`)
+  est une route du web : par défaut l'hôte de `ingress.web`, sinon pas de
+  lien.
+- Suppressions : un objet est libéré quand un fichier appliqué par tous les
+  pods ne le contient plus ; un canal ou compte dont Notify a refusé le
+  retrait garde son finalizer (`RemovalRefused`). Une instance reste tant
+  que des objets vivants y sont liés (`InstanceInUse`) ; force-orphan
+  libère toujours.
 - ServiceMonitor par instance (actif si le CRD existe).
 - Config cœur typée (OIDC, groupes admin, SMTP, VAPID, OTLP, rétention…)
   + `extraConfig` TOML, qui ne peut pas contenir `channels.managed`,
