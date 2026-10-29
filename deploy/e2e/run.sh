@@ -4,8 +4,8 @@
 # chart into the current kube context, then walks the golden path — a
 # NotifyLocalInstance runs the real Notify (migration Job, server, web), a
 # NotifyChannel reaches its pods, Alice publishes to it with her Dex token
-# and reads it back, the channel's deletion takes the access away — and
-# checks the instance's deletion.
+# and reads it back, the channel's deletion archives it (its history stays)
+# — and checks the instance's deletion.
 #
 # Env: IMAGE (operator image already loaded in the cluster, default
 # weebo-notify-operator:e2e), CERT_MANAGER_VERSION (default: the pinned
@@ -139,29 +139,39 @@ TOKEN="$(token)"
 payload="$(cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+')"
 while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="$payload="; done
 SUB="$(base64 -d <<<"$payload" | jq -er .sub)"
-sed "s|__SUB__|$SUB|" "$HERE/channel.yaml" | kubectl apply -f -
-ready -n team notifychannel/alerts
-
 notify() {
   curl -fsS -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     "http://127.0.0.1:18080/api/v1$1" "${@:2}"
 }
 
+# Her first request makes her a user: an `oidcSub` binding resolves only
+# to someone who has logged in.
+notify /me >/dev/null
+sed "s|__SUB__|$SUB|" "$HERE/channel.yaml" | kubectl apply -f -
+ready -n team notifychannel/alerts
+
 step "golden path: Alice publishes and reads it back"
-notify /notifications -X POST \
-  -d '{"channel": "alerts", "title": "e2e", "state": "open", "status": "info"}' \
-  | jq -e '.notification.channel == "alerts"' >/dev/null || fail "publish refused"
+# The binding resolves on the reload the channel caused, or on Notify's
+# next reconcile pass (every 60s).
+published=""
+for _ in $(seq 1 24); do
+  if notify /notifications -X POST \
+    -d '{"channel": "alerts", "title": "e2e", "state": "open", "status": "info"}' 2>/dev/null \
+    | jq -e '.notification.channel == "alerts"' >/dev/null; then
+    published=1
+    break
+  fi
+  sleep 5
+done
+[ -n "$published" ] || fail "Alice could never publish to alerts"
 notify '/notifications?channels=alerts' \
   | jq -e 'any(.items[]; .head.content.title == "e2e")' >/dev/null || fail "not in Alice's inbox"
 
-step "deleting the channel takes the access away"
+step "deleting the channel archives it (onRemoved: Archive, the default)"
 kubectl -n team delete notifychannel alerts --wait --timeout="$WAIT"
-status="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' http://127.0.0.1:18080/api/v1/notifications \
-  -d '{"channel": "alerts", "title": "after", "state": "open", "status": "info"}')"
-case "$status" in
-  2*) fail "published to a deleted channel ($status)" ;;
-esac
+# Notify keeps an archived channel and its history, unmanaged from now on.
+notify '/notifications?channels=alerts' \
+  | jq -e 'any(.items[]; .head.content.title == "e2e")' >/dev/null || fail "the archived channel lost its history"
 
 step "deleting the instance"
 kubectl -n team delete notifylocalinstance main --wait --timeout="$WAIT"
