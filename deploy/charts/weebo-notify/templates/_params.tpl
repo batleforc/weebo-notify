@@ -33,9 +33,16 @@ namespacedKinds:
 # sinks' fingerprint key…) and the sinks' secrets copied next to the pods:
 # said explicitly, also limited to one namespace.
 clusterSecrets: true
-# Kinds the admission webhook checks: none until the operator serves
-# `/validate` (TODO(2d): every kind, through Notify's own model).
-admitted: []
+# Kinds the admission webhook checks (`/validate`), on CREATE/UPDATE: a
+# configuration Notify's own model refuses (a transform's CEL that doesn't
+# compile…), pods the operator doesn't run, a tag the version guard
+# refuses, a Secret that doesn't opt in.
+admitted:
+  - notifylocalinstances
+  - notifychannels
+  - notifyserviceaccounts
+  - notifytransforms
+  - notifytrustpolicies
 # Cluster-wide only: the namespaced rules below, and the labels of the
 # namespaces objects come from (objectSelector.namespaces.from: Selector).
 # Limited to one namespace, none of them: they go to watchRules. No Secret

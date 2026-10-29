@@ -119,6 +119,16 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
             )
             .with_watches(watches.clone()),
     );
+    let credentials: Arc<KubeCredentials> = Arc::new(KubeCredentials::new(client.clone()));
+    // Checked by the same render as the reconcile, on every replica.
+    let admission = Arc::new(adapters_inbound::admission::NotifyAdmission {
+        credentials: credentials.clone(),
+        attached: instances.clone(),
+        directory: directory.clone(),
+        allowed_images: allowed_images.clone(),
+        default_image: settings.default_image.clone(),
+        default_web_image: settings.default_web_image.clone(),
+    });
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         instances: instances.clone(),
@@ -127,7 +137,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
             client.clone(),
             adapters_outbound::workload_settings(allowed_images),
         )),
-        credentials: Arc::new(KubeCredentials::new(client.clone())),
+        credentials,
         keys: Arc::new(RandomKeys),
         directory,
         ledger: Arc::new(KubeInstanceLedger::new(client.clone())),
@@ -148,13 +158,13 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         watches,
     });
 
-    // The HTTPS server (probes, the scope guard; the admission webhook in
-    // 2d) runs on every replica, before and regardless of leadership: a
+    // The HTTPS server (probes, the admission webhook, the scope guard)
+    // runs on every replica, before and regardless of leadership: a
     // standby must stay ready, and a leader-only webhook would turn every
     // failover into an outage. On shutdown it keeps answering while
     // endpoints drain.
     let server = webhook_server::spawn(
-        webhook::router(health.clone(), scope),
+        webhook::router(health.clone(), scope, admission),
         health,
         shutdown.clone(),
     )
