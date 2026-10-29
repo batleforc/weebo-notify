@@ -45,7 +45,25 @@
           ]
         },
         {
+          "path": "spec.federation.signingKeySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
           "path": "spec.sinks.fingerprintKeySecretRef",
+          "to": [
+            {
+              "group": "",
+              "kind": "Secret"
+            }
+          ]
+        },
+        {
+          "path": "spec.sinks.previousFingerprintKeySecretRefs[]",
           "to": [
             {
               "group": "",

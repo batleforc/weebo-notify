@@ -174,3 +174,58 @@ impl AttachedInstances for FakeInstances {
         Ok(self.instance.lock().unwrap().clone())
     }
 }
+
+/// Migration `Job`s by name, as the test sets them.
+#[derive(Default)]
+pub struct FakeJobs {
+    jobs: Mutex<BTreeMap<String, crate::ports::JobState>>,
+}
+
+impl FakeJobs {
+    pub fn set(&self, name: &str, state: crate::ports::JobState) {
+        self.jobs.lock().unwrap().insert(name.into(), state);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ports::Jobs for FakeJobs {
+    async fn job(
+        &self,
+        _namespace: &str,
+        name: &str,
+    ) -> Result<Option<crate::ports::JobState>, ApiError> {
+        Ok(self.jobs.lock().unwrap().get(name).cloned())
+    }
+}
+
+/// Keys numbered in the order they are made.
+#[derive(Default)]
+pub struct FakeKeys {
+    made: Mutex<u32>,
+}
+
+impl FakeKeys {
+    /// How many keys were made.
+    pub fn made(&self) -> u32 {
+        *self.made.lock().unwrap()
+    }
+
+    fn next(&self) -> u32 {
+        let mut made = self.made.lock().unwrap();
+        *made = made.saturating_add(1);
+        *made
+    }
+}
+
+impl crate::ports::KeyGenerator for FakeKeys {
+    fn key(&self) -> String {
+        format!("key-{}-{}", self.next(), "k".repeat(48))
+    }
+
+    fn ed25519_pem(&self) -> String {
+        format!(
+            "-----BEGIN PRIVATE KEY-----\nfake{}\n-----END PRIVATE KEY-----\n",
+            self.next()
+        )
+    }
+}

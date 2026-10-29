@@ -65,6 +65,9 @@ futures = "0.3"
 notify-config = { git = "https://github.com/batleforc/weebo-notify-v2", rev = "99d23c6" }
 # The `config.toml` the operator writes (the version notify-config uses).
 toml = "1.1"
+# Origins and ports of the URLs a spec names (the web UI's CSP, the
+# NetworkPolicy).
+url = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"                      # LANG-UNSAFE; "deny", not "forbid": #[expect(unsafe_code, reason)] must stay possible for FFI

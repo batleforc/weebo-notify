@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 weebo-kit-api = { workspace = true }
+weebo-kit-application = { workspace = true }
 weebo-kit-runtime = { workspace = true }
 
 # TODO(2e): the envtest controller tests (instance, objects, watch scope)

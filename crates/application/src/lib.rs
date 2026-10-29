@@ -5,6 +5,7 @@
 pub mod objects;
 pub mod ports;
 pub mod render;
+pub mod upgrade;
 pub mod use_cases;
 pub mod workload;
 

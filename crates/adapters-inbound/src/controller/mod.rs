@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use application::ports::{
-    AttachedInstances, Credentials, InstanceDirectory, KeyGenerator, ObjectDirectory, OwnedObjects,
-    StatusLedger,
+    AttachedInstances, Credentials, InstanceDirectory, Jobs, KeyGenerator, ObjectDirectory,
+    OwnedObjects, StatusLedger,
 };
 use application::use_cases::Outcome;
 use domain::Failure;
@@ -58,6 +58,10 @@ pub struct Ctx {
     pub directory: Arc<dyn ObjectDirectory>,
     /// Where an instance's pass records what it just wrote.
     pub ledger: Arc<dyn StatusLedger>,
+    /// The migration `Job`s.
+    pub jobs: Arc<dyn Jobs>,
+    /// The operator's own pods, let in by an instance's `NetworkPolicy`.
+    pub operator: weebo_kit_application::workload::OperatorPod,
     /// The operator's own settings.
     pub settings: Settings,
     /// One recorder for the whole process: the kit folds repeated Events
@@ -191,9 +195,20 @@ where
 /// failure, backing off while `obj` keeps failing (jittered — the kit's).
 pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
-        // A configuration being confirmed: read again soon.
-        Err(f) if f.reason == ReasonCode::ConfigPropagating => {
+        // A configuration being confirmed, a migration running: read again
+        // soon (the Job's watch is the fast path).
+        Err(f)
+            if matches!(
+                f.reason,
+                ReasonCode::ConfigPropagating | ReasonCode::Migrating
+            ) =>
+        {
             weebo_kit_runtime::controller::requeue_after(obj, false, Some(15))
+        }
+        // A rollout's progress comes through the Deployment's watch: the
+        // steady interval is the fallback.
+        Err(f) if f.reason == ReasonCode::WorkloadNotReady => {
+            weebo_kit_runtime::controller::requeue_after(obj, true, None)
         }
         Err(f) => {
             weebo_kit_runtime::controller::requeue_after(obj, f.reason.needs_a_change(), None)

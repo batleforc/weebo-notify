@@ -63,6 +63,12 @@ weebo_kit_domain::reason_codes! {
         /// The migration `Job` failed: the pods stay on the previous
         /// version.
         MigrationFailed,
+        /// The server's pods aren't all ready on the desired image and boot
+        /// configuration yet (rolling out, or not scheduled).
+        WorkloadNotReady,
+        /// `serviceMonitor.enabled` but the cluster has no `ServiceMonitor`
+        /// kind (no Prometheus operator): none is created (advisory).
+        MonitoringUnavailable,
         /// A Kubernetes API call of the operator itself failed (reading a
         /// CR or a Secret, applying an object, patching a status) —
         /// retried.
@@ -106,6 +112,7 @@ impl ReasonCode {
         match self {
             ReasonCode::Reconciled
             | ReasonCode::ChannelNotManaged
+            | ReasonCode::MonitoringUnavailable
             | ReasonCode::ConfigApplied
             | ReasonCode::ConfigRolledOut
             | ReasonCode::Migrated
@@ -153,6 +160,7 @@ mod tests {
             advisory,
             [
                 &ReasonCode::Reconciled,
+                &ReasonCode::MonitoringUnavailable,
                 &ReasonCode::ChannelNotManaged,
                 &ReasonCode::ConfigApplied,
                 &ReasonCode::ConfigRolledOut,

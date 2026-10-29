@@ -99,11 +99,53 @@ impl KeyGenerator for RandomKeys {
         getrandom::fill(&mut key).expect("the OS provides randomness");
         base64::engine::general_purpose::STANDARD.encode(key)
     }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "getrandom fails only without an OS entropy source: no key beats a weak one"
+    )]
+    fn ed25519_pem(&self) -> String {
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).expect("the OS provides randomness");
+        ed25519_pem(&seed)
+    }
+}
+
+/// The PKCS#8 v1 `PrivateKeyInfo` of an Ed25519 key (RFC 8410): this fixed
+/// header (algorithm `1.3.101.112`, an `OCTET STRING` of 32 bytes), then
+/// the seed — what `openssl genpkey -algorithm ed25519` writes.
+const ED25519_PKCS8_HEADER: [u8; 16] = [
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+];
+
+/// `seed` as a PEM `PRIVATE KEY` (one base64 line: 64 characters).
+fn ed25519_pem(seed: &[u8; 32]) -> String {
+    let mut der = ED25519_PKCS8_HEADER.to_vec();
+    der.extend_from_slice(seed);
+    format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+        base64::engine::general_purpose::STANDARD.encode(der)
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_federation_key_is_an_ed25519_pkcs8_pem_notify_loads() {
+        let pem = RandomKeys.ed25519_pem();
+        assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----\n"), "{pem}");
+        let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(body)
+            .unwrap();
+        assert_eq!(der.len(), 48);
+        // What jsonwebtoken (`EncodingKey::from_ed_pem`, ring underneath)
+        // and ed25519-dalek's `from_pkcs8_pem` accept: a v1 PKCS#8 key.
+        ring::signature::Ed25519KeyPair::from_pkcs8_maybe_unchecked(&der).unwrap();
+        assert_ne!(pem, RandomKeys.ed25519_pem());
+    }
 
     #[test]
     fn keys_are_48_random_bytes() {

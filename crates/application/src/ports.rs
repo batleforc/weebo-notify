@@ -109,6 +109,27 @@ pub trait KeyGenerator: Send + Sync {
     /// the filesystem store's link key): 48 random bytes, base64 (64
     /// characters, over Notify's 32-byte floor).
     fn key(&self) -> String;
+    /// An Ed25519 private key, PKCS#8 PEM (`-----BEGIN PRIVATE KEY-----`),
+    /// as `openssl genpkey -algorithm ed25519` writes it: the federation
+    /// signing key.
+    fn ed25519_pem(&self) -> String;
+}
+
+/// Where a `Job` stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobState {
+    pub active: bool,
+    /// Its `Complete` condition.
+    pub succeeded: bool,
+    /// Its `Failed` condition, and why.
+    pub failed: Option<String>,
+}
+
+/// The instances' migration `Job`s.
+#[async_trait::async_trait]
+pub trait Jobs: Send + Sync {
+    /// The `Job` `name` of `namespace`, `None` when absent.
+    async fn job(&self, namespace: &str, name: &str) -> Result<Option<JobState>, ApiError>;
 }
 
 /// Where a reconcile records status fields right after the write they

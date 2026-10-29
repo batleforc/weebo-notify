@@ -10,12 +10,14 @@
 
 pub mod cluster;
 pub mod instances;
+pub mod jobs;
 pub mod ledger;
 pub mod objects;
 
 use application::ports::ApiError;
 pub use cluster::{KubeCredentials, RandomKeys};
 pub use instances::LocalInstanceDirectory;
+pub use jobs::KubeJobs;
 pub use ledger::KubeInstanceLedger;
 pub use objects::KubeObjects;
 use weebo_kit_adapters::WorkloadSettings;

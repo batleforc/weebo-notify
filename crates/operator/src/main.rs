@@ -8,7 +8,7 @@ use std::time::Duration;
 use adapters_inbound::controller::{self, Ctx, Settings, Shutdown};
 use adapters_inbound::webhook;
 use adapters_outbound::{
-    KubeCredentials, KubeInstanceLedger, KubeObjects, LocalInstanceDirectory, RandomKeys,
+    KubeCredentials, KubeInstanceLedger, KubeJobs, KubeObjects, LocalInstanceDirectory, RandomKeys,
 };
 use api::LocalInstance;
 use kube::Client;
@@ -102,6 +102,9 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
 
     let holder_id = std::env::var("HOSTNAME").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
     let settings = settings_from_env();
+    // The operator's pods, as the chart labels them: an instance's
+    // NetworkPolicy lets them in (they read /healthz).
+    let operator = weebo_kit_runtime::pod::operator_pod("weebo-notify")?;
     let allowed_images = weebo_kit_application::pod_safety::parse_allowed_images(
         std::env::var("WEEBO_NOTIFY_ALLOWED_IMAGES").ok().as_deref(),
         &[api::notify::SERVER_IMAGE, api::notify::WEB_IMAGE],
@@ -127,6 +130,8 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         keys: Arc::new(RandomKeys),
         directory,
         ledger: Arc::new(KubeInstanceLedger::new(client.clone())),
+        jobs: Arc::new(KubeJobs::new(client.clone())),
+        operator,
         settings,
         recorder: Recorder::new(
             client.clone(),

@@ -34,8 +34,8 @@ pub mod paths {
     pub const CONFIG_KEY: &str = "config.toml";
     /// Where the `ConfigMap` is mounted (a directory: a `subPath` mount
     /// would never see an update).
-    pub const CONFIG_DIR: &str = "/etc/notify";
-    pub const CONFIG_FILE: &str = "/etc/notify/config.toml";
+    pub const CONFIG_DIR: &str = "/etc/weebo-notify";
+    pub const CONFIG_FILE: &str = "/etc/weebo-notify/config.toml";
     /// The port the server listens on (`[server] bind`).
     pub const PORT: u16 = 8080;
     /// The filesystem store's volume.
@@ -45,6 +45,14 @@ pub mod paths {
     pub const SINK_SECRETS_DIR: &str = "/var/run/notify/sinks";
     /// The VAPID key, mounted from its `Secret`.
     pub const VAPID_KEY_FILE: &str = "/var/run/notify/vapid/key";
+    /// The federation signing key, mounted from its `Secret`.
+    pub const FEDERATION_KEY_FILE: &str = "/var/run/notify/federation/key";
+    /// `[sinks] previous_fingerprint_keys` is a list: one variable per
+    /// key (`WNK_SINKS_PREVIOUS_FINGERPRINT_KEY_<i>`, ignored by Notify:
+    /// no such top-level key), and the list built from them by the
+    /// kubelet's `$(VAR)` expansion.
+    pub const PREVIOUS_KEY_ENV: &str = "WNK_SINKS_PREVIOUS_FINGERPRINT_KEY_";
+    pub const PREVIOUS_KEYS_ENV: &str = "WNK_SINKS__PREVIOUS_FINGERPRINT_KEYS";
     /// The key of the `Secret`s the operator generates.
     pub const GENERATED_KEY: &str = "key";
     /// The variable `[sinks.smtp] password_ref` names.
@@ -96,6 +104,8 @@ pub struct SecretEnv {
 pub struct SecretFile {
     pub path: String,
     pub source: SecretSource,
+    /// A `Secret` the operator generates (none named in the spec).
+    pub generated: bool,
 }
 
 /// What a referenced `Secret` is.
@@ -138,6 +148,8 @@ pub struct Rendered {
     /// pods.
     pub boot_hash: String,
     pub env: Vec<SecretEnv>,
+    /// Plain variables, after `env` (they may expand its `$(VAR)`s).
+    pub literal_env: Vec<(String, String)>,
     pub files: Vec<SecretFile>,
     /// What became of each object (`<kind>/<namespace>/<name>`).
     pub objects: BTreeMap<String, ObjectRender>,
@@ -164,6 +176,7 @@ const RESERVED: &[&str] = &[
     "attachments.token_secret",
     "sinks.fingerprint_key",
     "sinks.previous_fingerprint_keys",
+    "federation",
 ];
 
 /// The `Secret`s the instance's spec names (not those the operator
@@ -192,6 +205,12 @@ pub fn instance_secrets(namespace: &str, spec: &LocalInstanceSpec) -> Vec<Secret
         out.push(SecretSource::new(namespace, &r.name, &r.key));
     }
     if let Some(r) = &spec.sinks.fingerprint_key_secret_ref {
+        out.push(SecretSource::new(namespace, &r.name, &r.key));
+    }
+    for r in &spec.sinks.previous_fingerprint_key_secret_refs {
+        out.push(SecretSource::new(namespace, &r.name, &r.key));
+    }
+    if let Some(r) = &spec.federation.signing_key_secret_ref {
         out.push(SecretSource::new(namespace, &r.name, &r.key));
     }
     if let Some(r) = spec
@@ -447,7 +466,9 @@ fn instance_table(input: &Input<'_>) -> Result<toml::Table, Vec<String>> {
 }
 
 /// The variables and files the instance's own spec needs.
-fn instance_secret_mounts(input: &Input<'_>) -> (Vec<SecretEnv>, Vec<SecretFile>) {
+fn instance_secret_mounts(
+    input: &Input<'_>,
+) -> (Vec<SecretEnv>, Vec<(String, String)>, Vec<SecretFile>) {
     let (ns, spec) = (input.namespace, input.spec);
     let names = Names(input.name);
     let mut env = Vec::new();
@@ -503,6 +524,24 @@ fn instance_secret_mounts(input: &Input<'_>) -> (Vec<SecretEnv>, Vec<SecretFile>
             true,
         ),
     }
+    let mut previous = Vec::new();
+    for (i, r) in spec
+        .sinks
+        .previous_fingerprint_key_secret_refs
+        .iter()
+        .enumerate()
+    {
+        let name = format!("{}{i}", paths::PREVIOUS_KEY_ENV);
+        previous.push(format!("\"$({name})\""));
+        push_env(&name, SecretSource::new(ns, &r.name, &r.key), false);
+    }
+    let mut literal = Vec::new();
+    if !previous.is_empty() {
+        literal.push((
+            paths::PREVIOUS_KEYS_ENV.to_string(),
+            format!("[{}]", previous.join(",")),
+        ));
+    }
     if let Some(r) = spec
         .smtp
         .as_ref()
@@ -519,9 +558,31 @@ fn instance_secret_mounts(input: &Input<'_>) -> (Vec<SecretEnv>, Vec<SecretFile>
         files.push(SecretFile {
             path: paths::VAPID_KEY_FILE.into(),
             source: SecretSource::new(ns, &r.name, &r.key),
+            generated: false,
         });
     }
-    (env, files)
+    (env, literal, files)
+}
+
+/// The federation key's file: the spec's `Secret`, or the one the
+/// operator generates.
+fn federation_file(input: &Input<'_>) -> SecretFile {
+    let (source, generated) = match &input.spec.federation.signing_key_secret_ref {
+        Some(r) => (SecretSource::new(input.namespace, &r.name, &r.key), false),
+        None => (
+            SecretSource::new(
+                input.namespace,
+                &Names(input.name).federation_key(),
+                paths::GENERATED_KEY,
+            ),
+            true,
+        ),
+    };
+    SecretFile {
+        path: paths::FEDERATION_KEY_FILE.into(),
+        source,
+        generated,
+    }
 }
 
 /// Where an object's entry goes in the file.
@@ -718,7 +779,7 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
             "the instance's own configuration Notify would refuse: {e}"
         ))
     })?;
-    let (env, mut files) = instance_secret_mounts(input);
+    let (env, literal_env, mut files) = instance_secret_mounts(input);
 
     let mut views: Vec<ObjectView> = input
         .objects
@@ -734,6 +795,9 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
     let mut managed_channels: BTreeSet<String> = BTreeSet::new();
     let mut renders = BTreeMap::new();
     let mut sink_files = BTreeSet::new();
+    // A trust policy or a channel's publishers rendered: they need the
+    // federation key.
+    let mut federated = input.spec.federation.signing_key_secret_ref.is_some();
     for view in &views {
         let key = view.key();
         let mut render = ObjectRender {
@@ -780,6 +844,7 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
                     ObjectKind::Channel => {
                         managed_channels.extend(render.id.clone());
                         if let ObjectSpec::Channel(c) = &view.spec {
+                            federated |= !c.publishers.is_empty();
                             for r in c.sinks.iter().filter_map(|s| s.secret_ref.as_ref()) {
                                 sink_files.insert(SecretSource::new(
                                     &view.namespace,
@@ -790,6 +855,7 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
                         }
                     }
                     ObjectKind::Transform | ObjectKind::TrustPolicy => {
+                        federated |= view.kind() == ObjectKind::TrustPolicy;
                         render.unmanaged_channels = channels_named(view)
                             .iter()
                             .filter(|c| !managed_channels.contains(*c))
@@ -809,7 +875,18 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
     files.extend(sink_files.into_iter().map(|source| SecretFile {
         path: format!("{}/{}", paths::SINK_SECRETS_DIR, sink_entry(&source)),
         source,
+        generated: false,
     }));
+    if federated {
+        let federation = prune(json!({
+            "signing_key_file": paths::FEDERATION_KEY_FILE,
+            "audience": input.spec.federation.audience,
+        }));
+        let table = toml::Value::try_from(&federation)
+            .map_err(|e| RenderError::Invalid(format!("[federation] is not TOML: {e}")))?;
+        full.insert("federation".into(), table);
+        files.push(federation_file(input));
+    }
 
     let text = toml::to_string(&full)
         .map_err(|e| RenderError::Invalid(format!("the configuration is not TOML: {e}")))?;
@@ -823,6 +900,7 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
         config,
         text,
         env,
+        literal_env,
         files,
         objects: renders,
     })
@@ -830,7 +908,7 @@ pub fn render(input: &Input<'_>) -> Result<Rendered, RenderError> {
 
 #[cfg(test)]
 mod tests {
-    use api::local_instance::LocalInstanceSpec;
+    use api::local_instance::{LocalInstanceSpec, LocalSecretKeyRef};
     use serde_json::json;
 
     use super::*;
@@ -1006,7 +1084,14 @@ mod tests {
         assert!(rendered.env[3].generated);
         assert_eq!(rendered.env[3].source.name, "main-fingerprint-key");
         let files: Vec<_> = rendered.files.iter().map(|f| &f.source.name).collect();
-        assert_eq!(files, ["vapid", "hook"]);
+        assert_eq!(files, ["vapid", "hook", "main-federation-key"]);
+        assert!(rendered.files[2].generated);
+        // A trust policy is bound: the federation key is rendered.
+        let federation = config.federation.as_ref().unwrap();
+        assert_eq!(
+            federation.signing_key_file.to_str(),
+            Some("/var/run/notify/federation/key")
+        );
         assert_eq!(rendered.files[1].source.namespace, "team");
         assert_eq!(
             rendered.files[1].path,
@@ -1168,5 +1253,58 @@ mod tests {
         assert!(rendered.objects.is_empty());
         assert!(rendered.config.channels.managed.is_empty());
         assert!(object_secrets(&views).is_empty());
+    }
+
+    #[test]
+    fn federation_is_rendered_only_for_what_needs_it() {
+        let alone = render_with(&instance(), &[], &SecretStates::new()).unwrap();
+        assert!(alone.config.federation.is_none());
+        assert!(
+            alone
+                .files
+                .iter()
+                .all(|f| f.path != paths::FEDERATION_KEY_FILE)
+        );
+        let mut s = instance();
+        s.federation.signing_key_secret_ref = Some(LocalSecretKeyRef {
+            name: "fed".into(),
+            key: "key.pem".into(),
+        });
+        s.federation.audience = Some("notify-a".into());
+        let given = render_with(&s, &[], &SecretStates::new()).unwrap();
+        let federation = given.config.federation.as_ref().unwrap();
+        assert_eq!(federation.audience.as_deref(), Some("notify-a"));
+        let file = given.files.last().unwrap();
+        assert_eq!((file.source.name.as_str(), file.generated), ("fed", false));
+        assert!(
+            instance_secrets("notify", &s).contains(&SecretSource::new("notify", "fed", "key.pem"))
+        );
+    }
+
+    #[test]
+    fn previous_fingerprint_keys_come_as_one_list_variable() {
+        let mut s = instance();
+        s.sinks.previous_fingerprint_key_secret_refs = vec![
+            LocalSecretKeyRef {
+                name: "old".into(),
+                key: "a".into(),
+            },
+            LocalSecretKeyRef {
+                name: "older".into(),
+                key: "b".into(),
+            },
+        ];
+        let rendered = render_with(&s, &[], &SecretStates::new()).unwrap();
+        let names: Vec<_> = rendered.env.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"WNK_SINKS_PREVIOUS_FINGERPRINT_KEY_0"));
+        assert!(names.contains(&"WNK_SINKS_PREVIOUS_FINGERPRINT_KEY_1"));
+        assert_eq!(
+            rendered.literal_env,
+            [(
+                "WNK_SINKS__PREVIOUS_FINGERPRINT_KEYS".to_string(),
+                r#"["$(WNK_SINKS_PREVIOUS_FINGERPRINT_KEY_0)","$(WNK_SINKS_PREVIOUS_FINGERPRINT_KEY_1)"]"#
+                    .to_string()
+            )]
+        );
     }
 }

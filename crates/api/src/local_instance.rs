@@ -49,7 +49,13 @@ pub use self::NotifyLocalInstanceSpec as LocalInstanceSpec;
 #[serde(rename_all = "camelCase")]
 pub struct NotifyLocalInstanceSpec {
     /// The server's image. Its repository must be one the operator allows
-    /// (`managedInstances.allowedImages`).
+    /// (`managedInstances.allowedImages`). Its tag must be a Notify version
+    /// the operator supports, never below the version the database was last
+    /// migrated to (`status.migratedVersion`), and at most one minor ahead of
+    /// it — unless the annotation `notify.weebo.io/approved-upgrade` names
+    /// that tag. A new tag is migrated first (a `<name>-migrate-<hash>`
+    /// `Job`, condition `Migrated`); the pods keep the previous one until it
+    /// succeeds.
     #[serde(default, skip_serializing_if = "Image::is_default")]
     pub image: Image,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -101,6 +107,11 @@ pub struct NotifyLocalInstanceSpec {
     pub retention: Retention,
     #[serde(default, skip_serializing_if = "Sinks::is_default")]
     pub sinks: Sinks,
+    /// The key the CI tokens the instance mints are signed with. Rendered
+    /// as soon as a trust policy or a channel's `publishers` is bound (or a
+    /// key is given here): without it Notify ignores both.
+    #[serde(default, skip_serializing_if = "Federation::is_default")]
+    pub federation: Federation,
     #[serde(default)]
     pub channels: Channels,
     #[serde(default)]
@@ -436,6 +447,31 @@ pub struct Sinks {
     /// How long a dead letter is kept (`30d`, Notify's default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_letter_retention: Option<String>,
+    /// The keys used before `fingerprintKeySecretRef`, for one rollout after
+    /// a rotation (Notify re-keys the stored ids at boot), in labelled
+    /// `Secret`s. Without `"` or `\` (base64 or hex keys are fine).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_fingerprint_key_secret_refs: Vec<LocalSecretKeyRef>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Federation {
+    /// The Ed25519 private key (PKCS#8 PEM, `openssl genpkey -algorithm
+    /// ed25519`), in a labelled `Secret`. Unset: the operator generates one
+    /// (`<name>-federation-key`). Read at boot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key_secret_ref: Option<LocalSecretKeyRef>,
+    /// The minted tokens' audience. Notify: `weebo-notify`; change it when
+    /// instances share an ingress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<String>,
+}
+
+impl Federation {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Sinks {
@@ -625,6 +661,14 @@ impl Names<'_> {
     /// The generated filesystem link key.
     pub fn attachments_key(&self) -> String {
         format!("{}-attachments-key", self.0)
+    }
+    /// The generated federation signing key.
+    pub fn federation_key(&self) -> String {
+        format!("{}-federation-key", self.0)
+    }
+    /// The sinks' secrets, copied next to the pods.
+    pub fn sinks(&self) -> String {
+        format!("{}-sinks", self.0)
     }
 }
 

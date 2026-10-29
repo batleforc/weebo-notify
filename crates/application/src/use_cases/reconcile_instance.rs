@@ -1,41 +1,61 @@
-//! A `NotifyLocalInstance`: its configuration, then (2b) its workload. One
-//! pass:
+//! A `NotifyLocalInstance`: its configuration and its workload. One pass:
 //!
 //! 1. the Secrets the spec references are checked (present, with the
-//!    credential label): the pods read them, the operator never does;
+//!    credential label): the pods read them, the operator doesn't;
 //! 2. the objects bound to it are listed, the Secrets they reference
 //!    checked;
 //! 3. the file is rendered and checked by Notify's model (`InvalidSpec`:
 //!    nothing written), each object's fate recorded in `status.objects`;
-//! 4. `<name>-config` is written, its digest and boot hash recorded at
-//!    once;
-//! 5. TODO(2b): the workload — the migration `Job` of a new version, the
-//!    server's `Deployment` (the boot hash on its pod template), the web
-//!    UI, the `Service`s, `NetworkPolicy`, `PodDisruptionBudget`,
-//!    `Ingress`es, `ServiceMonitor`, the generated keys;
-//! 6. TODO(2c): the configuration's confirmation, pod by pod, from
-//!    `/healthz` (ADR-0032): `appliedConfigDigest`, each object's
-//!    `appliedGeneration`, the refused removals. Until then the instance
-//!    stays `ConfigPropagating`.
+//! 4. the image's tag is checked ([`crate::upgrade`],
+//!    `UnsupportedVersion`: nothing written);
+//! 5. the sinks' secrets are read (the only values the operator reads, to
+//!    copy them into `<name>-sinks`), the missing generated keys made;
+//! 6. a new tag is migrated first: its `<name>-migrate-<hash8>` `Job` runs,
+//!    the server keeps its running image (none yet: no `Deployment`) until
+//!    it succeeds (`Migrating`, `MigrationFailed`; then `Migrated`);
+//! 7. the objects are applied (none taken over, the pods checked by the
+//!    kit), the digest and boot hash recorded at once; the
+//!    `ServiceMonitor` apart (no such kind: `MonitoringUnavailable`); what
+//!    the spec no longer wants removed, old migration `Job`s pruned;
+//! 8. `Ready` once the server's pods all run the target image and boot
+//!    hash (`WorkloadNotReady`).
+//!
+//! TODO(2c): the configuration's confirmation, pod by pod, from `/healthz`
+//! (ADR-0032): `appliedConfigDigest`, each object's `appliedGeneration`,
+//! the refused removals.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use api::local_instance::{LocalInstanceSpec, Names};
 use api::status::InstanceStatus;
-use domain::Failure;
 use domain::error::ReasonCode;
+use domain::{Advisory, Failure};
+use weebo_kit_application::workload::{OperatorPod, stale};
 
 use super::{Outcome, api_failure, credential_failure, workload_failure};
 use crate::ports::{
-    CredentialError, Credentials, ObjectDirectory, OwnedObjects, Owner, StatusLedger,
+    CredentialError, Credentials, Jobs, KeyGenerator, ObjectDirectory, OwnedObjects, Owner,
+    StatusLedger, WorkloadError,
 };
-use crate::render::{self, Input, SecretState, SecretStates, paths};
+use crate::render::{self, Input, Rendered, SecretState, SecretStates, paths};
+use crate::workload::{self, WorkloadInput};
+
+/// How many migration `Job`s are kept besides the current one (their logs).
+pub const KEEP_MIGRATIONS: usize = 1;
 
 /// What a pass is about.
 #[derive(Debug, Clone)]
 pub struct InstancePass<'a> {
     pub owner: &'a Owner,
     pub spec: &'a LocalInstanceSpec,
+    pub annotations: &'a BTreeMap<String, String>,
     /// The status as read (the previous pass's).
     pub status: &'a InstanceStatus,
+    /// `repository:tag` of an instance without `image`, server and web.
+    pub default_image: &'a str,
+    pub default_web_image: &'a str,
+    /// The operator's pods, let in by the server's `NetworkPolicy`.
+    pub operator: &'a OperatorPod,
 }
 
 /// What a pass needs.
@@ -44,13 +64,17 @@ pub struct InstancePorts<'a> {
     pub credentials: &'a dyn Credentials,
     pub ledger: &'a dyn StatusLedger,
     pub directory: &'a dyn ObjectDirectory,
+    pub jobs: &'a dyn Jobs,
+    pub keys: &'a dyn KeyGenerator,
 }
 
-/// A pass's result: the `Ready` outcome and the status to publish.
+/// A pass's result: the `Ready` outcome, the status to publish, the Events
+/// to announce.
 #[derive(Debug, Clone)]
 pub struct InstanceReport {
     pub outcome: Outcome,
     pub status: InstanceStatus,
+    pub events: Vec<(ReasonCode, String)>,
 }
 
 /// The status fields a pass writes, for a merge patch against `previous`
@@ -98,40 +122,74 @@ pub async fn reconcile_instance(
     ports: &InstancePorts<'_>,
 ) -> InstanceReport {
     let mut status = pass.status.clone();
-    let ready = run(&pass, ports, &mut status).await;
+    let mut advisories = Vec::new();
+    let mut events = Vec::new();
+    let ready = run(&pass, ports, &mut status, &mut advisories, &mut events).await;
+    let mut outcome = match ready {
+        Ok(message) => Outcome::synced(message),
+        Err(failure) => Outcome::failed(failure),
+    };
+    if let Some(version) = &status.migrated_version {
+        advisories.push(Advisory {
+            reason: ReasonCode::Migrated,
+            message: format!("the database is migrated to Notify {version}"),
+        });
+    }
+    outcome.advisories = advisories;
     InstanceReport {
-        outcome: match ready {
-            Ok(message) => Outcome::synced(message),
-            Err(failure) => Outcome::failed(failure),
-        },
+        outcome,
         status,
+        events,
     }
 }
 
-async fn run(
-    pass: &InstancePass<'_>,
-    ports: &InstancePorts<'_>,
-    status: &mut InstanceStatus,
-) -> Result<String, Failure> {
-    let (owner, spec) = (pass.owner, pass.spec);
-    let names = Names(&owner.name);
-    status.endpoint = Some(format!(
-        "http://{}.{}.svc:{}",
-        names.server(),
-        owner.namespace,
-        paths::PORT
-    ));
+/// Where the migration to the target image stands.
+enum Migration {
+    Done,
+    Running,
+    Failed(String),
+}
 
-    // 1. The instance's own Secrets.
-    for source in render::instance_secrets(&owner.namespace, spec) {
+/// The `Secret`s render names that the operator generates, and whether
+/// each is an Ed25519 key (else a random string).
+fn generated_secrets(rendered: &Rendered) -> BTreeMap<String, bool> {
+    let mut out: BTreeMap<String, bool> = rendered
+        .env
+        .iter()
+        .filter(|e| e.generated)
+        .map(|e| (e.source.name.clone(), false))
+        .collect();
+    for file in rendered.files.iter().filter(|f| f.generated) {
+        out.insert(
+            file.source.name.clone(),
+            file.path == paths::FEDERATION_KEY_FILE,
+        );
+    }
+    out
+}
+
+/// The 404 of a kind the cluster doesn't serve, as the kit's adapter
+/// words a failed apply.
+fn kind_missing(e: &WorkloadError) -> bool {
+    matches!(e, WorkloadError::Kubernetes(m) if m.contains("404"))
+}
+
+async fn check_secrets(pass: &InstancePass<'_>, ports: &InstancePorts<'_>) -> Result<(), Failure> {
+    for source in render::instance_secrets(&pass.owner.namespace, pass.spec) {
         ports
             .credentials
             .check(&source.namespace, &source.name, &source.key)
             .await
             .map_err(credential_failure)?;
     }
+    Ok(())
+}
 
-    // 2. Its objects, and theirs.
+async fn render_file(
+    pass: &InstancePass<'_>,
+    ports: &InstancePorts<'_>,
+) -> Result<Rendered, Failure> {
+    let (owner, spec) = (pass.owner, pass.spec);
     let views = ports
         .directory
         .bound_to(owner, &spec.object_selector)
@@ -151,9 +209,7 @@ async fn run(
         };
         secrets.insert(source, state);
     }
-
-    // 3. The file.
-    let rendered = render::render(&Input {
+    render::render(&Input {
         namespace: &owner.namespace,
         name: &owner.name,
         spec,
@@ -161,13 +217,157 @@ async fn run(
         secrets: &secrets,
         previous: &pass.status.objects,
     })
-    .map_err(|e| Failure::new(ReasonCode::InvalidSpec, e.to_string()))?;
+    .map_err(|e| Failure::new(ReasonCode::InvalidSpec, e.to_string()))
+}
+
+/// The sinks' secrets, by their file name, and the generated keys not
+/// made yet.
+async fn values(
+    pass: &InstancePass<'_>,
+    ports: &InstancePorts<'_>,
+    rendered: &Rendered,
+) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>), Failure> {
+    let mut sinks = BTreeMap::new();
+    for file in &rendered.files {
+        let Some(entry) = file
+            .path
+            .strip_prefix(paths::SINK_SECRETS_DIR)
+            .and_then(|rest| rest.strip_prefix('/'))
+        else {
+            continue;
+        };
+        let value = ports
+            .credentials
+            .read(&file.source.namespace, &file.source.name, &file.source.key)
+            .await
+            .map_err(credential_failure)?;
+        sinks.insert(entry.to_string(), value);
+    }
+    let mut generated = BTreeMap::new();
+    for (name, ed25519) in generated_secrets(rendered) {
+        let existing = ports
+            .objects
+            .secret_text(pass.owner, &name, paths::GENERATED_KEY)
+            .await
+            .map_err(workload_failure)?;
+        if existing.is_none() {
+            let key = if ed25519 {
+                ports.keys.ed25519_pem()
+            } else {
+                ports.keys.key()
+            };
+            generated.insert(name, key);
+        }
+    }
+    Ok((sinks, generated))
+}
+
+async fn run(
+    pass: &InstancePass<'_>,
+    ports: &InstancePorts<'_>,
+    status: &mut InstanceStatus,
+    advisories: &mut Vec<Advisory>,
+    events: &mut Vec<(ReasonCode, String)>,
+) -> Result<String, Failure> {
+    let (owner, spec) = (pass.owner, pass.spec);
+    let names = Names(&owner.name);
+    status.endpoint = Some(format!(
+        "http://{}.{}.svc:{}",
+        names.server(),
+        owner.namespace,
+        paths::PORT
+    ));
+
+    // 1–3. The Secrets, the objects, the file.
+    check_secrets(pass, ports).await?;
+    let rendered = render_file(pass, ports).await?;
     status.objects = rendered.objects.clone();
 
-    // 4. Written, and said so at once.
+    // 4. The version.
+    let target = workload::image(&spec.image, pass.default_image);
+    let target_tag = workload::tag(&target).to_string();
+    crate::upgrade::check(
+        status.migrated_version.as_deref(),
+        &target_tag,
+        pass.annotations
+            .get(api::annotations::APPROVED_UPGRADE)
+            .map(String::as_str),
+    )
+    .map_err(|e| Failure::new(ReasonCode::UnsupportedVersion, e.to_string()))?;
+
+    // 5. The values the objects carry.
+    let (sinks, generated) = values(pass, ports, &rendered).await?;
+
+    // 6. Migrated first.
+    let running = ports
+        .objects
+        .rollout(owner, &names.server())
+        .await
+        .map_err(workload_failure)?;
+    let running_image = running
+        .as_ref()
+        .and_then(|r| r.annotation(workload::IMAGE_ANNOTATION))
+        .map(String::from);
+    let job = workload::migrate_job(&owner.name, &target);
+    let migration = if status.migrated_version.as_deref() == Some(target_tag.as_str()) {
+        Migration::Done
+    } else {
+        match ports
+            .jobs
+            .job(&owner.namespace, &job)
+            .await
+            .map_err(api_failure)?
+        {
+            Some(state) if state.succeeded => {
+                status.migrated_version = Some(target_tag.clone());
+                events.push((
+                    ReasonCode::Migrated,
+                    format!("the database was migrated to Notify {target_tag} ({job})"),
+                ));
+                Migration::Done
+            }
+            Some(state) => match state.failed {
+                Some(why) => Migration::Failed(why),
+                None => Migration::Running,
+            },
+            None => Migration::Running,
+        }
+    };
+    let (server_image, migrating) = match migration {
+        Migration::Done => (Some(target.as_str()), None),
+        _ => (running_image.as_deref(), Some(target.as_str())),
+    };
+
+    // 7. The objects.
+    let grow_claim = match &spec.attachments.filesystem {
+        Some(_) => workload::claim_grows(
+            spec,
+            ports
+                .objects
+                .claim_size(owner, &names.attachments())
+                .await
+                .map_err(workload_failure)?
+                .as_deref(),
+        ),
+        None => false,
+    };
+    let web_image = workload::image(&spec.web.image, pass.default_web_image);
+    let input = WorkloadInput {
+        name: &owner.name,
+        namespace: &owner.namespace,
+        spec,
+        rendered: &rendered,
+        server_image,
+        migration: migrating,
+        web_image: &web_image,
+        generated: &generated,
+        sinks: &sinks,
+        grow_claim,
+        operator: pass.operator,
+    };
     ports
         .objects
-        .apply(owner, &[crate::workload::config_map(owner, &rendered.text)])
+        .apply(owner, &workload::objects(&input))
         .await
         .map_err(workload_failure)?;
     status.config_digest = Some(rendered.config_digest.clone());
@@ -181,240 +381,89 @@ async fn run(
         )
         .await
         .map_err(api_failure)?;
-
-    // 5. TODO(2b): the workload, from `rendered.env`/`rendered.files`.
-    // 6. TODO(2c): the confirmation from `/healthz`.
-    let rendered_count = status
+    if let Some(monitor) = workload::service_monitor(&input) {
+        match ports.objects.apply(owner, &[monitor]).await {
+            Ok(()) => {}
+            Err(e) if kind_missing(&e) => advisories.push(Advisory {
+                reason: ReasonCode::MonitoringUnavailable,
+                message: "the cluster has no ServiceMonitor kind (monitoring.coreos.com/v1): \
+                          none is created"
+                    .into(),
+            }),
+            Err(e) => return Err(workload_failure(e)),
+        }
+    }
+    for (api_version, kind, name) in workload::removed(&input) {
+        ports
+            .objects
+            .remove(owner, api_version, kind, &name)
+            .await
+            .map_err(workload_failure)?;
+    }
+    let jobs = ports
         .objects
-        .values()
-        .filter(|r| r.state == api::status::RenderState::Rendered)
-        .count();
-    if status.applied_config_digest.is_some()
-        && status.applied_config_digest == status.config_digest
+        .list(
+            owner,
+            "batch/v1",
+            "Job",
+            &workload::selector(&owner.name, "migrate"),
+        )
+        .await
+        .map_err(workload_failure)?;
+    for old in stale(&jobs, &BTreeSet::from([job.clone()]), KEEP_MIGRATIONS) {
+        ports
+            .objects
+            .remove(owner, "batch/v1", "Job", &old)
+            .await
+            .map_err(workload_failure)?;
+    }
+
+    // 8. Where the pods stand.
+    let rollout = ports
+        .objects
+        .rollout(owner, &names.server())
+        .await
+        .map_err(workload_failure)?;
+    status.available_replicas = rollout.as_ref().map(|r| r.available);
+    let on_target = rollout.as_ref().is_some_and(|r| {
+        r.complete()
+            && r.annotation(workload::IMAGE_ANNOTATION) == Some(target.as_str())
+            && r.annotation(api::annotations::BOOT_HASH) == Some(rendered.boot_hash.as_str())
+    });
+    if let Some(image) = rollout
+        .as_ref()
+        .filter(|r| r.complete())
+        .and_then(|r| r.annotation(workload::IMAGE_ANNOTATION))
     {
-        Ok(format!(
-            "every pod runs the configuration ({rendered_count} objects rendered)"
-        ))
-    } else {
-        Err(Failure::new(
-            ReasonCode::ConfigPropagating,
+        status.version = Some(workload::tag(image).to_string());
+    }
+    match migration {
+        Migration::Failed(why) => Err(Failure::new(
+            ReasonCode::MigrationFailed,
             format!(
-                "configuration written to {} ({rendered_count} objects rendered), waiting for \
-                 the pods to load it",
-                names.config()
+                "the migration Job {job} to Notify {target_tag} failed ({why}): the pods stay on \
+                 {}; kubectl logs job/{job}",
+                running_image.as_deref().unwrap_or("nothing")
             ),
-        ))
+        )),
+        Migration::Running => Err(Failure::new(
+            ReasonCode::Migrating,
+            format!("the database is being migrated to Notify {target_tag} ({job})"),
+        )),
+        Migration::Done if on_target => Ok(format!(
+            "Notify {target_tag} runs on {} pod(s)",
+            status.available_replicas.unwrap_or_default()
+        )),
+        Migration::Done => Err(Failure::new(
+            ReasonCode::WorkloadNotReady,
+            format!(
+                "the server's pods are rolling out Notify {target_tag} ({}/{} available)",
+                status.available_replicas.unwrap_or_default(),
+                spec.replicas
+            ),
+        )),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use api::status::RenderState;
-    use serde_json::json;
-    use weebo_kit_application::test_support::FakeOwnedObjects;
-
-    use super::*;
-    use crate::objects::{ObjectSpec, ObjectView};
-    use crate::test_support::{FakeCredentials, FakeDirectory, FakeLedger};
-
-    fn spec() -> LocalInstanceSpec {
-        serde_json::from_value(json!({
-            "database": {"urlSecretRef": {"name": "db", "key": "url"}},
-            "attachments": {"s3": {"endpoint": "http://rustfs:9000", "bucket": "notify",
-                                   "credentialsSecretRef": {"name": "s3"}}},
-            "oidc": {"issuer": "https://id.example", "clientId": "notify"},
-        }))
-        .unwrap()
-    }
-
-    fn owner() -> Owner {
-        Owner {
-            namespace: "notify".into(),
-            name: "main".into(),
-            uid: "uid-1".into(),
-        }
-    }
-
-    fn credentials() -> FakeCredentials {
-        let credentials = FakeCredentials::default();
-        credentials.insert("notify", "db", &[("url", "postgres://u:p@db/notify")]);
-        credentials.insert(
-            "notify",
-            "s3",
-            &[("AWS_ACCESS_KEY_ID", "a"), ("AWS_SECRET_ACCESS_KEY", "s")],
-        );
-        credentials
-    }
-
-    fn channel(name: &str) -> ObjectView {
-        ObjectView {
-            namespace: "team".into(),
-            name: name.into(),
-            created: Some("2026-01-01T00:00:00Z".parse().unwrap()),
-            generation: Some(1),
-            spec: ObjectSpec::Channel(
-                serde_json::from_value(json!({
-                    "sinks": [{"type": "webhook", "url": "https://hooks.example.com",
-                               "secretRef": {"name": "hook", "key": "secret"}}],
-                }))
-                .unwrap(),
-            ),
-            deleting: false,
-        }
-    }
-
-    async fn pass(
-        status: &InstanceStatus,
-        credentials: &FakeCredentials,
-        directory: &FakeDirectory,
-        objects: &FakeOwnedObjects,
-        ledger: &FakeLedger,
-    ) -> InstanceReport {
-        let (owner, spec) = (owner(), spec());
-        reconcile_instance(
-            InstancePass {
-                owner: &owner,
-                spec: &spec,
-                status,
-            },
-            &InstancePorts {
-                objects,
-                credentials,
-                ledger,
-                directory,
-            },
-        )
-        .await
-    }
-
-    #[tokio::test]
-    async fn the_configuration_is_written_and_recorded() {
-        let (credentials, objects, ledger) = (
-            credentials(),
-            FakeOwnedObjects::default(),
-            FakeLedger::default(),
-        );
-        credentials.insert("team", "hook", &[("secret", "s3cr3t")]);
-        let directory = FakeDirectory::with(vec![channel("alerts")]);
-        let report = pass(
-            &InstanceStatus::default(),
-            &credentials,
-            &directory,
-            &objects,
-            &ledger,
-        )
-        .await;
-        assert_eq!(report.outcome.reason(), ReasonCode::ConfigPropagating);
-        let map = objects.object("ConfigMap", "main-config").unwrap();
-        let text = map.manifest["data"]["config.toml"].as_str().unwrap();
-        assert!(text.contains("id = \"alerts\""), "{text}");
-        assert!(!text.contains("s3cr3t"));
-        let status = &report.status;
-        assert_eq!(
-            status.config_digest.as_deref(),
-            Some(weebo_kit_application::workload::content_hash(text.as_bytes()).as_str())
-        );
-        assert!(status.boot_hash.is_some());
-        assert_eq!(
-            status.objects["NotifyChannel/team/alerts"].state,
-            RenderState::Rendered
-        );
-        assert_eq!(
-            status.endpoint.as_deref(),
-            Some("http://main.notify.svc:8080")
-        );
-        // Recorded right after the write.
-        let recorded = ledger.last().unwrap();
-        assert_eq!(recorded["configDigest"], json!(status.config_digest));
-
-        // Confirmed (2c will set it from /healthz): Ready.
-        let mut confirmed = report.status.clone();
-        confirmed.applied_config_digest = confirmed.config_digest.clone();
-        let again = pass(&confirmed, &credentials, &directory, &objects, &ledger).await;
-        assert_eq!(again.outcome.reason(), ReasonCode::Reconciled);
-    }
-
-    #[tokio::test]
-    async fn a_secret_missing_stops_the_instance_or_leaves_its_object_out() {
-        let (objects, ledger) = (FakeOwnedObjects::default(), FakeLedger::default());
-        let directory = FakeDirectory::with(vec![channel("alerts")]);
-        let none = FakeCredentials::default();
-        let report = pass(
-            &InstanceStatus::default(),
-            &none,
-            &directory,
-            &objects,
-            &ledger,
-        )
-        .await;
-        assert_eq!(report.outcome.reason(), ReasonCode::SecretMissing);
-        assert!(objects.object("ConfigMap", "main-config").is_none());
-
-        let credentials = credentials();
-        credentials.insert_unlabelled("team", "hook", &[("secret", "s3cr3t")]);
-        let report = pass(
-            &InstanceStatus::default(),
-            &credentials,
-            &directory,
-            &objects,
-            &ledger,
-        )
-        .await;
-        assert_eq!(report.outcome.reason(), ReasonCode::ConfigPropagating);
-        assert_eq!(
-            report.status.objects["NotifyChannel/team/alerts"].state,
-            RenderState::SecretNotAllowed
-        );
-    }
-
-    #[tokio::test]
-    async fn an_object_gone_is_dropped_from_the_status_by_name() {
-        let (credentials, objects, ledger) = (
-            credentials(),
-            FakeOwnedObjects::default(),
-            FakeLedger::default(),
-        );
-        credentials.insert("team", "hook", &[("secret", "s3cr3t")]);
-        let first = pass(
-            &InstanceStatus::default(),
-            &credentials,
-            &FakeDirectory::with(vec![channel("alerts")]),
-            &objects,
-            &ledger,
-        )
-        .await;
-        let second = pass(
-            &first.status,
-            &credentials,
-            &FakeDirectory::default(),
-            &objects,
-            &ledger,
-        )
-        .await;
-        assert!(second.status.objects.is_empty());
-        let fields = status_fields(&first.status, &second.status);
-        assert_eq!(
-            fields["objects"],
-            json!({"NotifyChannel/team/alerts": null})
-        );
-    }
-
-    #[tokio::test]
-    async fn an_owned_object_taken_is_a_conflict() {
-        let (credentials, objects, ledger) = (
-            credentials(),
-            FakeOwnedObjects::default(),
-            FakeLedger::default(),
-        );
-        objects.foreign("ConfigMap", "main-config");
-        let report = pass(
-            &InstanceStatus::default(),
-            &credentials,
-            &FakeDirectory::default(),
-            &objects,
-            &ledger,
-        )
-        .await;
-        assert_eq!(report.outcome.reason(), ReasonCode::OwnedObjectConflict);
-    }
-}
+mod tests;

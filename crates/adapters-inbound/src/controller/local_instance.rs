@@ -1,7 +1,7 @@
-//! `NotifyLocalInstance` (namespaced): the instance's configuration, then
-//! its workload (`reconcile_instance`). Watched besides the CR: the
-//! objects it owns, by metadata (TODO(2b): its `Deployment`s and pods),
-//! and the channels, service accounts, transforms and trust policies bound
+//! `NotifyLocalInstance` (namespaced): the instance's configuration and
+//! its workload (`reconcile_instance`). Watched besides the CR, by
+//! metadata: its `ConfigMap`, `Deployment`s (a rollout's progress) and
+//! migration `Job`s; and the channels, service accounts, transforms and trust policies bound
 //! to it — a change of one re-renders it. No watch of the Secrets it
 //! references: they are checked again on every pass.
 //!
@@ -16,6 +16,8 @@ use application::ports::Owner;
 use application::use_cases::reconcile_instance::{
     InstancePass, InstancePorts, reconcile_instance, status_fields,
 };
+use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::api::Api;
 use kube::core::PartialObjectMeta;
@@ -24,6 +26,7 @@ use kube::runtime::finalizer::{Event as Finalizer, finalizer};
 use kube::runtime::reflector::ObjectRef;
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource, ResourceExt};
+use weebo_kit_runtime::events;
 use weebo_kit_runtime::shared::WatchesIn;
 use weebo_kit_runtime::status::StatusUpdate;
 
@@ -86,15 +89,28 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
         .labels(&format!("app.kubernetes.io/managed-by={}", api::MANAGED_BY));
     // Metadata only: what changed, not the objects.
     let config_maps: Api<PartialObjectMeta<ConfigMap>> = ctx.scope.api(client.clone());
+    let deployments: Api<PartialObjectMeta<Deployment>> = ctx.scope.api(client.clone());
+    let jobs: Api<PartialObjectMeta<Job>> = ctx.scope.api(client.clone());
     let controller = ctx
         .watches
         .controller(ctx.scope.api::<LocalInstance>(client.clone()), &ctx.scope)
         // Its configuration edited or deleted by hand: written back.
         .watches_stream(
-            watcher(config_maps, owned)
+            watcher(config_maps, owned.clone())
                 .default_backoff()
                 .touched_objects(),
             |c| instance_of(&c),
+        )
+        // A rollout's progress, a migration finishing.
+        .watches_stream(
+            watcher(deployments, owned.clone())
+                .default_backoff()
+                .touched_objects(),
+            |d| instance_of(&d),
+        )
+        .watches_stream(
+            watcher(jobs, owned).default_backoff().touched_objects(),
+            |j| instance_of(&j),
         );
     let controller = watching::<api::Channel>(controller, &ctx, &client);
     let controller = watching::<api::ServiceAccount>(controller, &ctx, &client);
@@ -140,13 +156,19 @@ async fn apply(
         InstancePass {
             owner: &owner,
             spec: &instance.spec,
+            annotations: instance.annotations(),
             status: &previous,
+            default_image: &ctx.settings.default_image,
+            default_web_image: &ctx.settings.default_web_image,
+            operator: &ctx.operator,
         },
         &InstancePorts {
             objects: ctx.objects.as_ref(),
             credentials: ctx.credentials.as_ref(),
             ledger: ctx.ledger.as_ref(),
             directory: ctx.directory.as_ref(),
+            jobs: ctx.jobs.as_ref(),
+            keys: ctx.keys.as_ref(),
         },
     )
     .await;
@@ -164,5 +186,15 @@ async fn apply(
         },
     )
     .await?;
+    for (reason, message) in &report.events {
+        events::announce_change(
+            &ctx.recorder,
+            &instance.object_ref(&()),
+            *reason,
+            events::RECONCILE,
+            message,
+        )
+        .await;
+    }
     Ok(super::requeue_after(instance, &report.outcome))
 }

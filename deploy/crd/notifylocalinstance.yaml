@@ -188,10 +188,44 @@ spec:
                   those in a `Secret` and reference it with an `env:`/`file:` value.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              federation:
+                description: |-
+                  The key the CI tokens the instance mints are signed with. Rendered
+                  as soon as a trust policy or a channel's `publishers` is bound (or a
+                  key is given here): without it Notify ignores both.
+                properties:
+                  audience:
+                    description: |-
+                      The minted tokens' audience. Notify: `weebo-notify`; change it when
+                      instances share an ingress.
+                    nullable: true
+                    type: string
+                  signingKeySecretRef:
+                    description: |-
+                      The Ed25519 private key (PKCS#8 PEM, `openssl genpkey -algorithm
+                      ed25519`), in a labelled `Secret`. Unset: the operator generates one
+                      (`<name>-federation-key`). Read at boot.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                type: object
               image:
                 description: |-
                   The server's image. Its repository must be one the operator allows
-                  (`managedInstances.allowedImages`).
+                  (`managedInstances.allowedImages`). Its tag must be a Notify version
+                  the operator supports, never below the version the database was last
+                  migrated to (`status.migratedVersion`), and at most one minor ahead of
+                  it — unless the annotation `notify.weebo.io/approved-upgrade` names
+                  that tag. A new tag is migrated first (a `<name>-migrate-<hash>`
+                  `Job`, condition `Migrated`); the pods keep the previous one until it
+                  succeeds.
                 properties:
                   pullPolicy:
                     enum:
@@ -510,6 +544,23 @@ spec:
                     - key
                     - name
                     type: object
+                  previousFingerprintKeySecretRefs:
+                    description: |-
+                      The keys used before `fingerprintKeySecretRef`, for one rollout after
+                      a rotation (Notify re-keys the stored ids at boot), in labelled
+                      `Secret`s. Without `"` or `\` (base64 or hex keys are fine).
+                    items:
+                      description: A key of a `Secret` in the referencing CR's own namespace.
+                      properties:
+                        key:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    type: array
                 type: object
               smtp:
                 description: The relay `email` sinks hand their mail to.
