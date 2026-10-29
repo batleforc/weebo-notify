@@ -59,10 +59,9 @@ uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
 # Notify's configuration model and its structural validation (ADR-0031):
 # what the operator renders is parsed and checked by Notify's own code.
-# Provisional pin on a commit of the `refactor/notify-config` branch: move
-# it to `tag = "v0.3.0"` once Notify is tagged (and `api::notify::VERSION`
-# with it).
-notify-config = { git = "https://github.com/batleforc/weebo-notify-v2", rev = "99d23c6" }
+# Pinned on the Notify release whose images the operator defaults to
+# (`api::notify::VERSION`): move both together.
+notify-config = { git = "https://github.com/batleforc/weebo-notify-v2", tag = "v0.3.0" }
 # The `config.toml` the operator writes (the version notify-config uses).
 toml = "1.1"
 # Origins and ports of the URLs a spec names (the web UI's CSP, the
