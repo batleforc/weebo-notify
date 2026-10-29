@@ -111,6 +111,8 @@ kubectl -n team create secret generic s3 \
 vapid="$(mktemp)"
 openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "$vapid"
 kubectl -n team create secret generic vapid --from-file=key.pem="$vapid"
+# The instance's pods read only the Secrets labelled for it.
+kubectl -n team label secret db s3 vapid notify.weebo.io/credential=true
 # Through the admission webhook: retry while cert-manager injects its CA
 # and its endpoints get ready.
 applied=""
