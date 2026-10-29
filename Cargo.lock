@@ -9,11 +9,11 @@ dependencies = [
  "adapters-outbound",
  "api",
  "application",
+ "async-trait",
  "axum",
  "domain",
  "k8s-openapi",
  "kube",
- "opentelemetry",
  "serde",
  "serde_json",
  "testkit",
@@ -1222,7 +1222,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1296,7 +1296,7 @@ checksum = "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
 dependencies = [
  "io-lifetimes",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2314,7 +2314,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2821,7 +2821,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3126,7 +3126,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3185,7 +3185,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3662,7 +3662,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3670,9 +3670,6 @@ name = "testkit"
 version = "0.1.0"
 dependencies = [
  "application",
- "envtest",
- "kube",
- "rustls",
  "weebo-kit-testkit",
 ]
 
@@ -4372,8 +4369,8 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-adapters"
-version = "0.24.0"
-source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.24.0#2dbed2d802e6ed73f9b981312798a921ac6ac800"
+version = "0.25.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.25.0#defc63206a606ee6d923d1e5bc62effcfe2a3f37"
 dependencies = [
  "async-trait",
  "futures",
@@ -4395,8 +4392,8 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-api"
-version = "0.24.0"
-source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.24.0#2dbed2d802e6ed73f9b981312798a921ac6ac800"
+version = "0.25.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.25.0#defc63206a606ee6d923d1e5bc62effcfe2a3f37"
 dependencies = [
  "k8s-openapi",
  "schemars",
@@ -4406,8 +4403,8 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-application"
-version = "0.24.0"
-source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.24.0#2dbed2d802e6ed73f9b981312798a921ac6ac800"
+version = "0.25.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.25.0#defc63206a606ee6d923d1e5bc62effcfe2a3f37"
 dependencies = [
  "async-trait",
  "k8s-openapi",
@@ -4420,13 +4417,13 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-domain"
-version = "0.24.0"
-source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.24.0#2dbed2d802e6ed73f9b981312798a921ac6ac800"
+version = "0.25.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.25.0#defc63206a606ee6d923d1e5bc62effcfe2a3f37"
 
 [[package]]
 name = "weebo-kit-runtime"
-version = "0.24.0"
-source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.24.0#2dbed2d802e6ed73f9b981312798a921ac6ac800"
+version = "0.25.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.25.0#defc63206a606ee6d923d1e5bc62effcfe2a3f37"
 dependencies = [
  "async-trait",
  "axum",
@@ -4453,13 +4450,15 @@ dependencies = [
 
 [[package]]
 name = "weebo-kit-testkit"
-version = "0.24.0"
-source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.24.0#2dbed2d802e6ed73f9b981312798a921ac6ac800"
+version = "0.25.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.25.0#defc63206a606ee6d923d1e5bc62effcfe2a3f37"
 dependencies = [
  "envtest",
+ "k8s-openapi",
  "kube",
  "rustls",
  "serde",
+ "serde_json",
  "serde_norway",
  "tokio",
 ]
@@ -4470,7 +4469,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4484,15 +4483,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets",
 ]

@@ -29,12 +29,12 @@ testkit = { path = "crates/testkit" }
 # Shared operator kit. To iterate on it locally, temporarily swap the
 # `git`/`tag` pair for `path = "../weebo-operator-kit/crates/<crate>"` —
 # never push with a path dependency (CI and container builds don't see it).
-weebo-kit-domain = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.24.0" }
-weebo-kit-api = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.24.0" }
-weebo-kit-application = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.24.0" }
-weebo-kit-adapters = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.24.0" }
-weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.24.0" }
-weebo-kit-testkit = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.24.0" }
+weebo-kit-domain = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.25.0" }
+weebo-kit-api = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.25.0" }
+weebo-kit-application = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.25.0" }
+weebo-kit-adapters = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.25.0" }
+weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.25.0" }
+weebo-kit-testkit = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.25.0" }
 
 # Same versions as the kit: a mismatch would link two copies of
 # `kube`/`k8s-openapi` and the types wouldn't line up.
@@ -69,8 +69,6 @@ toml = "1.1"
 url = "2"
 # Plain HTTP to the instances' pods (`/healthz`, in-cluster): the version
 # the kit's OTLP exporter already links.
-# The control plane of the integration tests (the kit's testkit uses it).
-envtest = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 
 [workspace.lints.rust]

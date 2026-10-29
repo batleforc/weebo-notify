@@ -4,12 +4,12 @@
 //! Secret not created yet, no instance yet, an id an older object holds)
 //! is admitted with a warning `kubectl` shows.
 //!
-//! The kit's `admission::router` (v0.24.0) can only allow or deny: this
-//! route is its decision, with the same rules — a `DELETE` is always
-//! allowed (a cleanup is never stranded), an `UPDATE` leaving `spec` alone
-//! is allowed (finalizer removal, labels), anything not understood fails
-//! closed — plus `warnings`, and the same
-//! `<prefix>_webhook_decisions_total` counter.
+//! Served by the kit's `admission::router` ([`crate::webhook`]): a
+//! `DELETE` is always allowed (a cleanup is never stranded), an `UPDATE`
+//! leaving `spec` alone is allowed (finalizer removal, labels), anything
+//! not understood fails closed, a refusal is a 403 with its reason code,
+//! the warnings go in the review's `warnings`, and every decision counts
+//! in `<prefix>_webhook_decisions_total`.
 
 use std::sync::Arc;
 
@@ -18,19 +18,12 @@ use application::admission::{
 };
 use application::objects::{ObjectSpec, ObjectView};
 use application::ports::{AttachedInstances, Credentials, ObjectDirectory};
-use axum::Router;
-use axum::extract::{Json, State};
-use axum::routing::post;
 use domain::Failure;
 use domain::error::ReasonCode;
 use kube::ResourceExt;
 use kube::core::DynamicObject;
-use kube::core::admission::{AdmissionRequest, AdmissionResponse, AdmissionReview, Operation};
-use opentelemetry::KeyValue;
-use opentelemetry::metrics::Counter;
 use weebo_kit_api::{BoundInstance, InstanceRef};
-use weebo_kit_runtime::Health;
-use weebo_kit_runtime::admission::typed;
+use weebo_kit_runtime::admission::{Admission, Denial, typed};
 
 pub struct NotifyAdmission {
     pub credentials: Arc<dyn Credentials>,
@@ -72,7 +65,7 @@ where
 impl NotifyAdmission {
     /// The decision on `object` of kind `kind`, created or updated in
     /// `namespace`: `Ok(warnings)` admits it.
-    pub async fn admit(
+    pub async fn decide(
         &self,
         kind: &str,
         namespace: &str,
@@ -140,98 +133,43 @@ impl NotifyAdmission {
     }
 }
 
-async fn decide(
-    admission: &NotifyAdmission,
-    req: &AdmissionRequest<DynamicObject>,
-) -> Result<Warnings, Failure> {
-    if req.operation == Operation::Delete {
-        return Ok(Warnings::new());
+#[async_trait::async_trait]
+impl Admission for NotifyAdmission {
+    type Reason = ReasonCode;
+
+    async fn admit(
+        &self,
+        kind: &str,
+        namespace: &str,
+        object: &DynamicObject,
+    ) -> Result<(), Denial<ReasonCode>> {
+        self.admit_with_warnings(kind, namespace, object)
+            .await
+            .map(drop)
     }
-    let Some(object) = req.object.as_ref() else {
-        return Err(invalid("request carries no object"));
-    };
-    if let Some(old) = req.old_object.as_ref()
-        && old.data.get("spec") == object.data.get("spec")
-    {
-        return Ok(Warnings::new());
+
+    async fn admit_with_warnings(
+        &self,
+        kind: &str,
+        namespace: &str,
+        object: &DynamicObject,
+    ) -> Result<Vec<String>, Denial<ReasonCode>> {
+        self.decide(kind, namespace, object)
+            .await
+            .map_err(|f| Denial::new(f.reason, f.message))
     }
-    let namespace = req.namespace.as_deref().unwrap_or_default();
-    admission.admit(&req.kind.kind, namespace, object).await
-}
 
-/// One review, answered: what `/validate` does, without HTTP nor the
-/// counter.
-pub async fn handle(
-    admission: &NotifyAdmission,
-    review: AdmissionReview<DynamicObject>,
-) -> AdmissionReview<DynamicObject> {
-    let Ok(req): Result<AdmissionRequest<DynamicObject>, _> = review.try_into() else {
-        return AdmissionResponse::invalid("AdmissionReview without a request").into_review();
-    };
-    match decide(admission, &req).await {
-        Ok(warnings) => {
-            let mut response = AdmissionResponse::from(&req);
-            response.warnings = (!warnings.is_empty()).then_some(warnings);
-            response.into_review()
-        }
-        Err(failure) => {
-            let mut response = AdmissionResponse::from(&req).deny(failure.message);
-            response.result.code = 403;
-            response.result.reason = failure.reason.as_str().to_string();
-            response.into_review()
-        }
+    fn undecidable(&self) -> ReasonCode {
+        ReasonCode::InvalidSpec
     }
-}
-
-struct AdmissionState {
-    admission: Arc<NotifyAdmission>,
-    decisions: Counter<u64>,
-}
-
-async fn validate(
-    State(state): State<Arc<AdmissionState>>,
-    Json(review): Json<AdmissionReview<DynamicObject>>,
-) -> Json<AdmissionReview<DynamicObject>> {
-    let kind = review
-        .request
-        .as_ref()
-        .map(|r| r.kind.kind.clone())
-        .unwrap_or_default();
-    let answer = handle(state.admission.as_ref(), review).await;
-    let allowed = answer.response.as_ref().is_some_and(|r| r.allowed);
-    state.decisions.add(
-        1,
-        &[
-            KeyValue::new("kind", kind),
-            KeyValue::new("result", if allowed { "allow" } else { "deny" }),
-        ],
-    );
-    Json(answer)
-}
-
-/// `POST /validate`, plus the kit's `/readyz`, `/livez`, `/healthz`.
-pub fn router(admission: Arc<NotifyAdmission>, health: Arc<Health>) -> Router {
-    let decisions = opentelemetry::global::meter(crate::controller::FIELD_MANAGER)
-        .u64_counter(format!(
-            "{}_webhook_decisions",
-            crate::controller::METRIC_PREFIX
-        ))
-        .with_description("Admission webhook decisions, by kind and result (allow/deny)")
-        .build();
-    let state = Arc::new(AdmissionState {
-        admission,
-        decisions,
-    });
-    Router::new()
-        .route("/validate", post(validate))
-        .with_state(state)
-        .merge(weebo_kit_runtime::health::routes(health))
 }
 
 #[cfg(test)]
 mod tests {
     use application::test_support::{FakeCredentials, FakeDirectory, FakeInstances};
+    use kube::core::admission::AdmissionReview;
     use serde_json::{Value, json};
+    use weebo_kit_runtime::admission::handle;
 
     use super::*;
 

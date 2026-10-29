@@ -22,5 +22,11 @@ pub fn router(health: Arc<Health>, scope: WatchScope, admission: Arc<NotifyAdmis
         annotations: api::ANNOTATIONS,
         reason: ReasonCode::LeavesWatchScope,
     };
-    crate::admission::router(admission, health).merge(scope_router(Arc::new(guard)))
+    weebo_kit_runtime::admission::router(
+        admission,
+        health,
+        crate::controller::FIELD_MANAGER,
+        crate::controller::METRIC_PREFIX,
+    )
+    .merge(scope_router(Arc::new(guard)))
 }

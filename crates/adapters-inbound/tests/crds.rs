@@ -172,17 +172,19 @@ async fn the_crds_refuse_what_their_rules_say() {
     assert!(bad_id.is_some());
 }
 
-/// The admission decision with the real adapters reading this API server
-/// (envtest can't call a webhook back without a TLS listener and a
-/// `ValidatingWebhookConfiguration`: the router is driven in-process).
+/// The admission decision with the real adapters reading this API server,
+/// through the kit's review handling (envtest can't call a webhook back
+/// without a TLS listener and a `ValidatingWebhookConfiguration`: the
+/// review is answered in-process).
 #[tokio::test]
 async fn the_admission_reads_the_cluster_and_answers_with_notify_s_words() {
     use std::sync::Arc;
 
-    use adapters_inbound::admission::{NotifyAdmission, handle};
+    use adapters_inbound::admission::NotifyAdmission;
     use adapters_outbound::{KubeCredentials, KubeObjects, LocalInstanceDirectory};
     use kube::core::DynamicObject;
     use kube::core::admission::AdmissionReview;
+    use weebo_kit_runtime::admission::handle;
 
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
