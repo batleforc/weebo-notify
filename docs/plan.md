@@ -68,7 +68,12 @@ external : sans API admin il n'aurait rien à piloter ; pas de
   filesystem = PVC créée par l'opérateur + `token_secret`, refusé à
   l'admission si `replicas > 1`.
 - Ingress API et web (host, classe, Secret TLS, annotations). HTTPRoute
-  plus tard.
+  plus tard. L'Ingress API ne route que `/api/v1` (ni `/healthz`, ni
+  `/readyz`, ni `/metrics`).
+- URL publique de l'API (`WNK_API_BASE_URL` du web, `permalinkBase` par
+  défaut) : `spec.server.publicUrl` si fourni (Gateway API, proxy externe),
+  sinon l'hôte de `ingress.api`, sinon l'URL du Service avec un avis : le
+  navigateur n'atteint pas l'API.
 - ServiceMonitor par instance (actif si le CRD existe).
 - Config cœur typée (OIDC, groupes admin, SMTP, VAPID, OTLP, rétention…)
   + `extraConfig` TOML, qui ne peut pas contenir `channels.managed`,
