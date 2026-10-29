@@ -63,7 +63,7 @@ external : sans API admin il n'aurait rien à piloter ; pas de
 - Job `notify-server migrate` par version d'image avant le rollout,
   condition `Migrated` (avec la version) ; pods en
   `MIGRATE_ON_START=false`.
-- Postgres apporté : `spec.database.dsnSecretRef`. Pas de CNPG.
+- Postgres apporté : `spec.database.urlSecretRef`. Pas de CNPG.
 - Pièces jointes S3 par défaut (endpoint, bucket, Secret d'identifiants) ;
   filesystem = PVC créée par l'opérateur + `token_secret`, refusé à
   l'admission si `replicas > 1`.
@@ -116,8 +116,23 @@ et n'entre pas dans la garde `max_removals`.
   `env:`/`file:`, longueur des fingerprint keys et du `token_secret` du
   stockage filesystem) restent au boot du serveur : un secret invalide
   remonte en rollout échoué sur l'instance, pas en refus d'admission.
-- La séparation boot / rechargeable vient de `reloaded_from` /
-  `unreloadable` de `notify-config`, pas d'une copie dans l'opérateur.
+- La séparation boot / rechargeable vient de `reloaded_from` de
+  `notify-config` (le hash de boot est celui de
+  `config.reloaded_from(Config::default())` plus les émetteurs de
+  fédération), pas d'une copie dans l'opérateur. `unreloadable` ne sert pas :
+  il ne liste qu'une partie des clés lues au boot (il manque rétention, CORS,
+  télémétrie, push).
+- Clés générées par l'opérateur quand le spec n'en fournit pas (une seule
+  par instance, partagée par tous les pods) : fingerprint key des sinks,
+  clé de signature des liens du stockage filesystem, clé Ed25519 de
+  fédération (`spec.federation.signingKeySecretRef`, sans laquelle Notify
+  ignore trust policies et `publishers` des canaux). La rotation de la
+  fingerprint key passe par `spec.sinks.previousFingerprintKeySecretRefs`.
+- Secrets des sinks d'un canal d'un autre namespace : l'opérateur les copie
+  dans le Secret `<instance>-sinks`, monté en répertoire et référencé en
+  `file:` (ajouter un sink ne redémarre rien). Deux consentements :
+  l'instance accepte le namespace (`objectSelector.namespaces`) et le Secret
+  porte le label `credential`.
 - Chaque release de l'opérateur fixe l'image notify par défaut
   (`ghcr.io/batleforc/weebo-notify`, `-web`) au tag de sa dépendance
   `notify-config` et déclare une plage supportée ; hors plage :
@@ -148,8 +163,8 @@ et n'entre pas dans la garde `max_removals`.
 ### Sécurité
 
 - Tout Secret lu par les pods porte `notify.weebo.io/credential: "true"`
-  (`pod_safety` du kit) : DSN, S3, SMTP, VAPID, `secretRef` des sinks,
-  fingerprint key.
+  (`pod_safety` du kit) : URL de la base, S3, SMTP, VAPID, `secretRef` des
+  sinks, fingerprint keys, clé de fédération.
 - Pas de RBAC `pods/exec`.
 
 ### Chart et observabilité
