@@ -5,6 +5,8 @@ includes:
   # cog.toml, rendered from weebo-operator-kit's template (task kit:cog),
   # and the pins on the kit (task kit:sync).
   kit: ./.tasks/kit.yaml
+  # The kind e2e (deploy/e2e/run.sh), apart from `test`.
+  e2e: ./.tasks/e2e.yaml
   # The kit's shared tasks, pinned to the kit tag of Cargo.toml and to
   # their sha256: `task kit:sync` rewrites both. `task --offline` runs from
   # Task's cache.
@@ -72,6 +74,11 @@ tasks:
     cmds:
       # --no-fail-fast: one failing crate must not hide the others' results.
       - mise exec -- cargo test --workspace --lib --bins --no-fail-fast
+
+  golden:update:
+    desc: "Rewrite the golden files (crates/application/testdata/golden: config.toml, the instance's objects) from what the operator renders now"
+    cmds:
+      - UPDATE_GOLDEN=1 mise exec -- cargo test -p application --lib golden
 
   test:integration:
     desc: "Every test target, including the envtest integration tests under crates/*/tests"

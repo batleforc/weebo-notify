@@ -4,6 +4,8 @@
 
 pub mod admission;
 pub mod confirm;
+#[cfg(test)]
+mod golden;
 pub mod objects;
 pub mod ports;
 pub mod render;
