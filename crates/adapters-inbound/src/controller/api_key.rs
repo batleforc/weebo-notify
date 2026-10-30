@@ -1,12 +1,13 @@
 //! `NotifyApiKey` (namespaced): its key minted through the instance's key
 //! issuer and written to its targets (`reconcile_api_key`); revoked, its
-//! targets deleted, on deletion. Triggered by the key and by the
-//! `NotifyServiceAccount` it names (its readiness, its id).
+//! targets deleted, on deletion. Triggered by the key, by the
+//! `NotifyServiceAccount` it names (its readiness, its id) and by its
+//! instance (running, rolled out with its key issuer).
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use api::ApiKey;
+use api::{ApiKey, LocalInstance};
 use application::use_cases::reconcile_api_key::{
     ApiKeyPass, ApiKeyPorts, ApiKeyRelease, reconcile_api_key, release_api_key,
 };
@@ -32,9 +33,34 @@ fn naming(keys: Option<&Store<ApiKey>>, account: &api::ServiceAccount) -> Vec<Ob
         .collect()
 }
 
+/// The keys bound to `instance`.
+fn bound_to(keys: Option<&Store<ApiKey>>, instance: &LocalInstance) -> Vec<ObjectRef<ApiKey>> {
+    let (namespace, name) = (instance.namespace(), instance.name_any());
+    keys.map(|store| store.state())
+        .unwrap_or_default()
+        .iter()
+        .filter(|k| {
+            k.status
+                .as_ref()
+                .and_then(|s| s.instance.as_ref())
+                .is_some_and(|b| b.namespace == namespace && b.name == name)
+        })
+        .map(|k| ObjectRef::from_obj(k.as_ref()))
+        .collect()
+}
+
+/// What a key waits for of its instance (its `Service`, its boot
+/// configuration rolled out), hashed by the watch predicate.
+fn instance_view(instance: &LocalInstance) -> Option<serde_json::Value> {
+    let status = instance.status.as_ref()?;
+    let ready = weebo_kit_api::status::ready(&status.conditions).map(|c| &c.status);
+    serde_json::to_value((&status.endpoint, &status.boot_hash, ready)).ok()
+}
+
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
     let keys = ctx.watches.get::<ApiKey>().map(|w| w.store());
+    let keys_of_instance = keys.clone();
     let results = ctx
         .watches
         .controller(ctx.scope.api::<ApiKey>(client.clone()), &ctx.scope)
@@ -45,6 +71,13 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
             &client,
             |account: &api::ServiceAccount| super::hash_of(&account_view(account)),
             move |account| naming(keys.as_ref(), &account),
+        )
+        .watches_in_filtered(
+            &ctx.watches,
+            &ctx.scope,
+            &client,
+            |instance: &LocalInstance| super::hash_of(&instance_view(instance)),
+            move |instance| bound_to(keys_of_instance.as_ref(), &instance),
         )
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile, error_policy, ctx);

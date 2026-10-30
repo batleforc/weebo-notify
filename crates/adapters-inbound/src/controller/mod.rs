@@ -213,12 +213,16 @@ where
 /// failure, backing off while `obj` keeps failing (jittered — the kit's).
 pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
-        // A configuration being confirmed, a migration running: read again
-        // soon (the Job's watch is the fast path).
+        // A configuration being confirmed, a migration running, an API key
+        // waiting for its account or its instance's key issuer: read again
+        // soon (the watches are the fast path).
         Err(f)
             if matches!(
                 f.reason,
-                ReasonCode::ConfigPropagating | ReasonCode::Migrating
+                ReasonCode::ConfigPropagating
+                    | ReasonCode::Migrating
+                    | ReasonCode::ServiceAccountNotReady
+                    | ReasonCode::KeyIssuerUnavailable
             ) =>
         {
             weebo_kit_runtime::controller::requeue_after(obj, false, Some(15))
