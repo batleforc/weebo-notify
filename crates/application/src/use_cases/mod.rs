@@ -3,6 +3,7 @@
 //! [`Outcome`] the controller turns into a status patch and Events —
 //! always through a `ReasonCode`, never a free string.
 
+pub mod reconcile_api_key;
 pub mod reconcile_instance;
 pub mod reconcile_object;
 

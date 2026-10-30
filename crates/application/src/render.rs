@@ -57,6 +57,11 @@ pub mod paths {
     pub const GENERATED_KEY: &str = "key";
     /// The variable `[sinks.smtp] password_ref` names.
     pub const SMTP_PASSWORD_ENV: &str = "WNK_SMTP_PASSWORD";
+    /// The operator's `[[key_issuers]]` entry: its id (the token is
+    /// presented as `wki_<id>_<secret>`) and the variable its token is
+    /// read from.
+    pub const KEY_ISSUER_ID: &str = "weebo-notify-operator";
+    pub const KEY_ISSUER_ENV: &str = "WNK_KEY_ISSUER_TOKEN";
 }
 
 /// A key of a `Secret`.
@@ -177,6 +182,7 @@ const RESERVED: &[&str] = &[
     "sinks.fingerprint_key",
     "sinks.previous_fingerprint_keys",
     "federation",
+    "key_issuers",
 ];
 
 /// The `Secret`s the instance's spec names (not those the operator
@@ -455,6 +461,11 @@ fn instance_table(input: &Input<'_>) -> Result<toml::Table, Vec<String>> {
         },
         "push": push,
         "telemetry": telemetry,
+        // The operator mints the API keys of `NotifyApiKey`s with it.
+        "key_issuers": [{
+            "id": paths::KEY_ISSUER_ID,
+            "token": format!("env:{}", paths::KEY_ISSUER_ENV),
+        }],
     });
     let mut base = match table(value) {
         Ok(t) => t,
@@ -532,6 +543,11 @@ fn instance_secret_mounts(
             true,
         ),
     }
+    push_env(
+        paths::KEY_ISSUER_ENV,
+        SecretSource::new(ns, &names.key_issuer(), paths::GENERATED_KEY),
+        true,
+    );
     let mut previous = Vec::new();
     for (i, r) in spec
         .sinks
@@ -1086,11 +1102,18 @@ mod tests {
                 "WNK_ATTACHMENTS__ACCESS_KEY",
                 "WNK_ATTACHMENTS__SECRET_KEY",
                 "WNK_SINKS__FINGERPRINT_KEY",
+                "WNK_KEY_ISSUER_TOKEN",
                 "WNK_SMTP_PASSWORD",
             ]
         );
         assert!(rendered.env[3].generated);
         assert_eq!(rendered.env[3].source.name, "main-fingerprint-key");
+        // The operator's key issuer: a generated token, by reference.
+        assert!(rendered.env[4].generated);
+        assert_eq!(rendered.env[4].source.name, "main-key-issuer");
+        assert_eq!(config.key_issuers.len(), 1);
+        assert_eq!(config.key_issuers[0].id, "weebo-notify-operator");
+        assert_eq!(config.key_issuers[0].token, "env:WNK_KEY_ISSUER_TOKEN");
         let files: Vec<_> = rendered.files.iter().map(|f| &f.source.name).collect();
         assert_eq!(files, ["vapid", "hook", "main-federation-key"]);
         assert!(rendered.files[2].generated);
@@ -1158,6 +1181,11 @@ mod tests {
         let new_issuer = render_with(&spec, &issuer, &SecretStates::new()).unwrap();
         assert_ne!(new_issuer.boot_hash, base.boot_hash);
         assert!(!base.config.unreloadable(&new_issuer.config).is_empty());
+
+        // The key issuers: read at boot (their token too).
+        let mut no_issuer = base.config.clone();
+        no_issuer.key_issuers.clear();
+        assert_ne!(boot_hash(&no_issuer).unwrap(), base.boot_hash);
     }
 
     #[test]

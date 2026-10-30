@@ -12,10 +12,13 @@ and the objects it is configured with, built on
 | `NotifyServiceAccount` | `nsa` | A managed service account (`[[service_accounts]]`)                    |
 | `NotifyTransform`      | `ntr` | A JSON webhook transform (`[[transforms]]`, CEL)                      |
 | `NotifyTrustPolicy`    | `ntp` | A federation trust policy (`[[trust_policy]]`)                        |
+| `NotifyApiKey`         | `nak` | A service account's API key, minted into Secrets or Vault             |
 
 All namespaced. The objects are rendered into their instance's
 configuration (parsed and checked by Notify's own `notify-config`); Notify
-reloads the file when it changes.
+reloads the file when it changes. An API key is minted through Notify's
+API instead, as the instance's key issuer, and written to its
+`secretTargets` (Kubernetes Secrets, or the operator's Vault).
 
 ## Layout
 
@@ -26,7 +29,7 @@ Hexagonal, one crate per layer, same rules as every weebo operator:
 | `domain`            | the reason codes (`reason_codes!`), no dependency                        |
 | `api`               | the CRD types (`#[derive(CustomResource)]`), the kit's shared field types |
 | `application`       | ports, the `config.toml` render (`render`), the `reconcile_*` use cases   |
-| `adapters-outbound` | the ports on the Kubernetes API (instances, bound objects, Secrets, status) |
+| `adapters-outbound` | the ports on the Kubernetes API (instances, bound objects, Secrets, status), Notify's key routes, Vault |
 | `adapters-inbound`  | the controllers and the webhook router (health and scope routes for now)  |
 | `operator`          | the binary: telemetry, leader election, webhook server, controllers      |
 | `crdgen`            | writes `deploy/crd/` from `api` (CRDs, and `links.json` for the CRD IDE)  |

@@ -8,8 +8,9 @@ use std::time::Duration;
 use adapters_inbound::controller::{self, Ctx, Settings, Shutdown};
 use adapters_inbound::webhook;
 use adapters_outbound::{
-    KubeCredentials, KubeInstanceLedger, KubeJobs, KubeObjects, KubeReplicaHealth,
-    LocalInstanceDirectory, RandomKeys,
+    HttpKeyIssuer, KubeCredentials, KubeInstanceLedger, KubeJobs, KubeObjects, KubeReplicaHealth,
+    KubeServiceAccounts, LocalInstanceDirectory, OperatorSecretStores, RandomKeys,
+    SecretStoreSettings,
 };
 use api::LocalInstance;
 use kube::Client;
@@ -75,6 +76,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     scope.ensure::<api::ServiceAccount>()?;
     scope.ensure::<api::Transform>()?;
     scope.ensure::<api::TrustPolicy>()?;
+    scope.ensure::<api::ApiKey>()?;
     tracing::info!(
         namespace = ?scope.watched_namespace(),
         selector = ?scope.selector(),
@@ -120,6 +122,19 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
             .with_watches(watches.clone()),
     );
     let credentials: Arc<KubeCredentials> = Arc::new(KubeCredentials::new(client.clone()));
+    // The chart's `secretStore`: an incomplete Vault stops the start here.
+    let secret_store =
+        SecretStoreSettings::parse(std::env::var("WEEBO_NOTIFY_SECRET_STORE").ok().as_deref())
+            .map_err(anyhow::Error::msg)?;
+    tracing::info!(
+        default_backend = ?secret_store.default_backend,
+        vault = ?secret_store.vault.as_ref().map(|v| &v.address),
+        "API keys' secret store"
+    );
+    let mut accounts = KubeServiceAccounts::new(client.clone());
+    if let Some(shared) = watches.get::<api::ServiceAccount>() {
+        accounts = accounts.with_store(shared.store());
+    }
     // Checked by the same render as the reconcile, on every replica.
     let admission = Arc::new(adapters_inbound::admission::NotifyAdmission {
         credentials: credentials.clone(),
@@ -143,6 +158,9 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         ledger: Arc::new(KubeInstanceLedger::new(client.clone())),
         jobs: Arc::new(KubeJobs::new(client.clone())),
         health_checks: Arc::new(KubeReplicaHealth::new(client.clone())?),
+        accounts: Arc::new(accounts),
+        issuer: Arc::new(HttpKeyIssuer::new()?),
+        secret_stores: Arc::new(OperatorSecretStores::new(client.clone(), secret_store)),
         operator,
         settings,
         recorder: Recorder::new(
@@ -194,6 +212,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         controller::object::run::<api::ServiceAccount>(client.clone(), ctx.clone()),
         controller::object::run::<api::Transform>(client.clone(), ctx.clone()),
         controller::object::run::<api::TrustPolicy>(client.clone(), ctx.clone()),
+        controller::api_key::run(client.clone(), ctx.clone()),
     );
     // Every controller returns once the shutdown signal arrived and its
     // in-flight reconciles finished: hand the lease over right away

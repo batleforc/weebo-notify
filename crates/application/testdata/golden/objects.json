@@ -20,7 +20,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "config.toml": "[admin]\noidc_groups = []\n\n[attachments]\nbucket = \"notify\"\nendpoint = \"http://rustfs.storage:9000\"\nkind = \"s3\"\n\n[channels]\non_removed = \"archive\"\n\n[database]\nmigrate_on_start = false\n\n[oidc]\nclient_id = \"notify\"\nissuer = \"https://id.example.com/application/o/notify/\"\n\n[push.webpush]\ncontact = \"mailto:ops@example.com\"\nvapid_key_file = \"/var/run/notify/vapid/key\"\n\n[reconcile]\nallow_mass_removal = false\nmax_removals = 5\n\n[retention]\n\n[server]\nbind = \"0.0.0.0:8080\"\ncors_origins = [\"https://app.example.com\"]\n\n[sinks]\n"
+      "config.toml": "[admin]\noidc_groups = []\n\n[attachments]\nbucket = \"notify\"\nendpoint = \"http://rustfs.storage:9000\"\nkind = \"s3\"\n\n[channels]\non_removed = \"archive\"\n\n[database]\nmigrate_on_start = false\n\n[[key_issuers]]\nid = \"weebo-notify-operator\"\ntoken = \"env:WNK_KEY_ISSUER_TOKEN\"\n\n[oidc]\nclient_id = \"notify\"\nissuer = \"https://id.example.com/application/o/notify/\"\n\n[push.webpush]\ncontact = \"mailto:ops@example.com\"\nvapid_key_file = \"/var/run/notify/vapid/key\"\n\n[reconcile]\nallow_mass_removal = false\nmax_removals = 5\n\n[retention]\n\n[server]\nbind = \"0.0.0.0:8080\"\ncors_origins = [\"https://app.example.com\"]\n\n[sinks]\n"
     },
     "kind": "ConfigMap",
     "metadata": {
@@ -111,7 +111,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "notify.weebo.io/boot-hash": "bdb14051c5b5b60e0e9656968dc54031a68495b727294c0b1f0394bfa4e2d35b",
+            "notify.weebo.io/boot-hash": "2755c1d4f006343b86cdcb2f6f887686400e58ea0e019922d8878db88a3cc4f7",
             "notify.weebo.io/image": "ghcr.io/batleforc/weebo-notify-v2:v0.3.1"
           },
           "labels": {
@@ -170,6 +170,16 @@
                     "secretKeyRef": {
                       "key": "key",
                       "name": "main-fingerprint-key",
+                      "optional": false
+                    }
+                  }
+                },
+                {
+                  "name": "WNK_KEY_ISSUER_TOKEN",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "key",
+                      "name": "main-key-issuer",
                       "optional": false
                     }
                   }

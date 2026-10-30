@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use application::ports::{
-    AttachedInstances, Credentials, InstanceDirectory, Jobs, KeyGenerator, ObjectDirectory,
-    OwnedObjects, ReplicaHealth, StatusLedger,
+    AttachedInstances, Credentials, InstanceDirectory, Jobs, KeyGenerator, KeyIssuer,
+    ObjectDirectory, OwnedObjects, ReplicaHealth, SecretStores, ServiceAccounts, StatusLedger,
 };
 use application::use_cases::Outcome;
 use domain::Failure;
@@ -30,6 +30,7 @@ pub use weebo_kit_runtime::Shutdown;
 /// liveness.
 pub use weebo_kit_runtime::controller::{controller, drive};
 
+pub mod api_key;
 pub mod local_instance;
 pub mod object;
 
@@ -62,6 +63,12 @@ pub struct Ctx {
     pub jobs: Arc<dyn Jobs>,
     /// The instances' server pods' `/healthz`.
     pub health_checks: Arc<dyn ReplicaHealth>,
+    /// The service accounts API keys name.
+    pub accounts: Arc<dyn ServiceAccounts>,
+    /// Notify's key routes, as an instance's key issuer.
+    pub issuer: Arc<dyn KeyIssuer>,
+    /// Where API keys are written (Kubernetes, the operator's Vault).
+    pub secret_stores: Arc<dyn SecretStores>,
     /// The operator's own pods, let in by an instance's `NetworkPolicy`.
     pub operator: weebo_kit_application::workload::OperatorPod,
     /// The operator's own settings.
@@ -115,6 +122,12 @@ pub fn spawn_watches(client: &Client, scope: &WatchScope, health: &Arc<Health>) 
         scope,
         health,
         "NotifyTrustPolicy watch",
+    );
+    watches.spawn(
+        scope.api::<api::ApiKey>(client.clone()),
+        scope,
+        health,
+        "NotifyApiKey watch",
     );
     watches
 }
@@ -200,12 +213,16 @@ where
 /// failure, backing off while `obj` keeps failing (jittered — the kit's).
 pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
-        // A configuration being confirmed, a migration running: read again
-        // soon (the Job's watch is the fast path).
+        // A configuration being confirmed, a migration running, an API key
+        // waiting for its account or its instance's key issuer: read again
+        // soon (the watches are the fast path).
         Err(f)
             if matches!(
                 f.reason,
-                ReasonCode::ConfigPropagating | ReasonCode::Migrating
+                ReasonCode::ConfigPropagating
+                    | ReasonCode::Migrating
+                    | ReasonCode::ServiceAccountNotReady
+                    | ReasonCode::KeyIssuerUnavailable
             ) =>
         {
             weebo_kit_runtime::controller::requeue_after(obj, false, Some(15))

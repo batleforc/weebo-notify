@@ -17,7 +17,7 @@ use adapters_inbound::controller::{self, Ctx, Settings, Shutdown};
 use adapters_outbound::{
     KubeCredentials, KubeInstanceLedger, KubeJobs, KubeObjects, LocalInstanceDirectory, RandomKeys,
 };
-use application::test_support::FakeReplicas;
+use application::test_support::{FakeIssuer, FakeReplicas};
 use k8s_openapi::ByteString;
 use k8s_openapi::api::core::v1::{Namespace, Secret};
 use kube::Client;
@@ -39,6 +39,15 @@ pub fn allowed_images() -> Vec<String> {
 
 /// The context, and the pods' answers the test sets.
 pub fn ctx(client: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>, Arc<FakeReplicas>) {
+    let (ctx, health, replicas, _) = ctx_with_issuer(client, scope);
+    (ctx, health, replicas)
+}
+
+/// [`ctx`], and Notify's key routes in memory.
+pub fn ctx_with_issuer(
+    client: &Client,
+    scope: WatchScope,
+) -> (Arc<Ctx>, Arc<Health>, Arc<FakeReplicas>, Arc<FakeIssuer>) {
     let health = Arc::new(Health::default());
     let watches = controller::spawn_watches(client, &scope, &health);
     let mut instances = LocalInstanceDirectory::new(client.clone()).with_scope(
@@ -58,6 +67,7 @@ pub fn ctx(client: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>, Arc<Fa
             .with_watches(watches.clone()),
     );
     let replicas = Arc::new(FakeReplicas::default());
+    let issuer = Arc::new(FakeIssuer::default());
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         instances: instances.clone(),
@@ -72,6 +82,12 @@ pub fn ctx(client: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>, Arc<Fa
         ledger: Arc::new(KubeInstanceLedger::new(client.clone())),
         jobs: Arc::new(KubeJobs::new(client.clone())),
         health_checks: replicas.clone(),
+        accounts: Arc::new(adapters_outbound::KubeServiceAccounts::new(client.clone())),
+        issuer: issuer.clone(),
+        secret_stores: Arc::new(adapters_outbound::OperatorSecretStores::new(
+            client.clone(),
+            Default::default(),
+        )),
         operator: OperatorPod::named("weebo-notify"),
         settings: Settings::default(),
         recorder: Recorder::new(
@@ -86,7 +102,7 @@ pub fn ctx(client: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>, Arc<Fa
         scope,
         watches,
     });
-    (ctx, health, replicas)
+    (ctx, health, replicas, issuer)
 }
 
 pub async fn namespace(client: &Client, name: &str, labels: &[(&str, &str)]) {

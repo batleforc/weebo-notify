@@ -1,6 +1,8 @@
-//! Outbound adapters. Notify has no administration API the operator could
-//! drive: it talks to it through the file it renders and the objects it
-//! owns (the kit's `KubeOwnedObjects`). What is the operator's own here:
+//! Outbound adapters. The operator configures Notify through the file it
+//! renders and the objects it owns (the kit's `KubeOwnedObjects`); its
+//! only API calls are the key routes, as the instance's key issuer
+//! ([`HttpKeyIssuer`]), whose keys go to Kubernetes `Secret`s or the
+//! operator's Vault ([`OperatorSecretStores`]). What is the operator's own here:
 //! which instance a CR lives on ([`LocalInstanceDirectory`]), the objects
 //! bound to an instance ([`KubeObjects`]), the Secrets the specs name
 //! ([`KubeCredentials`]), fresh keys ([`RandomKeys`]), the instance's status
@@ -8,20 +10,26 @@
 //! tying the kit's adapters to `NotifyLocalInstance`
 //! ([`workload_settings`]).
 
+pub mod accounts;
 pub mod cluster;
 pub mod health;
 pub mod instances;
 pub mod jobs;
 pub mod ledger;
+pub mod notify_api;
 pub mod objects;
+pub mod secret_store;
 
+pub use accounts::KubeServiceAccounts;
 use application::ports::ApiError;
 pub use cluster::{KubeCredentials, RandomKeys};
 pub use health::KubeReplicaHealth;
 pub use instances::LocalInstanceDirectory;
 pub use jobs::KubeJobs;
 pub use ledger::KubeInstanceLedger;
+pub use notify_api::HttpKeyIssuer;
 pub use objects::KubeObjects;
+pub use secret_store::{OperatorSecretStores, SecretStoreSettings};
 use weebo_kit_adapters::WorkloadSettings;
 
 /// A failed Kubernetes call as the ports' [`ApiError`]: `what` was being

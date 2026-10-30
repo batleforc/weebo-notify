@@ -1,0 +1,112 @@
+---
+title: API keys
+description: Keys of managed service accounts, minted by the operator into Kubernetes Secrets or Vault.
+---
+
+A `NotifyApiKey` gives a workload a key of a `NotifyServiceAccount`
+without anyone logging in: the operator mints it through its instance's
+key issuer and writes it to the CR's `secretTargets`.
+
+```yaml
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyServiceAccount
+metadata:
+  name: grafana
+  namespace: team
+---
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyChannel
+metadata:
+  name: alerts
+  namespace: team
+spec:
+  access:
+    - serviceAccount: grafana
+      scopes: [publish]
+---
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyApiKey
+metadata:
+  name: grafana
+  namespace: team
+spec:
+  serviceAccountRef:
+    name: grafana
+  scopes: [publish]
+  channels: [alerts]
+```
+
+Each target gets two keys:
+
+| Key              | Value                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `NOTIFY_API_KEY` | the key, `wnk_<prefix>_<secret>`: `Authorization: Bearer $NOTIFY_API_KEY`                |
+| `NOTIFY_URL`     | the instance's `server.publicUrl`, else `https://<ingress.api.host>`, else its `Service` |
+
+## How it works
+
+- Every instance declares one `[[key_issuers]]` entry for the operator.
+  Its token is generated into the Secret `<instance>-key-issuer` and read
+  by the pods at boot (ADR-0033 of Notify). A key issuer can only mint,
+  list and revoke the keys of managed service accounts. It never gets more
+  rights than the account already holds in a channel.
+- A key is minted once its service account is `Ready` (applied by every
+  pod). Notify refuses a scope the account doesn't hold in every channel
+  listed: the key is then `KeyRefused` until the channel grants it.
+- A key can't be read back. A new key is minted when a target loses it,
+  when `scopes`, `channels` or the account change, or when the annotation
+  `notify.weebo.io/rotate-secret` gets a new value. The new key is written
+  to every target before the previous one is revoked (Event `KeyRotated`).
+- The keys of a CR carry the label `weebo-notify:<namespace>/<name>`:
+  don't give a key minted by hand that label, the operator would revoke it.
+- Deleting the CR revokes its key and deletes its targets
+  (`notify.weebo.io/force-orphan: "true"` leaves both). Deleting the
+  service account revokes its keys too.
+
+## Targets
+
+`secretTargets` takes the kit's target format, the same as the other weebo
+operators. Without targets, the key goes to one target named after the CR,
+on the operator's default backend.
+
+```yaml
+secretTargets:
+  # A Kubernetes Secret of this namespace (the default backend).
+  - name: grafana-notify
+  # Vault: <pathPrefix>/<namespace>/<name>, or an explicit path under it.
+  - backend: vault
+    name: grafana-notify
+```
+
+A target stays in the CR's namespace: a Secret of another namespace, or
+a Vault path outside `<pathPrefix>/<namespace>/`, is refused at
+admission or fails `SecretTargetFailed`. A target holding a value another
+CR wrote is never overwritten.
+
+## Vault
+
+The Vault connection is the operator's, set in its chart, never by an
+instance. Otherwise whoever creates an instance could point the
+operator's Vault identity at any path. The operator logs in with its own
+ServiceAccount token (Kubernetes auth):
+
+```bash
+helm upgrade weebo-notify oci://ghcr.io/batleforc/charts/weebo-notify \
+  --reuse-values \
+  --set secretStore.vault.address=https://vault.example.com:8200 \
+  --set secretStore.vault.kubernetesAuthRole=weebo-notify
+```
+
+| Value                                   | Default          |                                                               |
+| --------------------------------------- | ---------------- | ------------------------------------------------------------- |
+| `secretStore.defaultBackend`            | `kubernetes`     | the backend of a key without `secretTargets`                  |
+| `secretStore.vault.address`             | empty (no Vault) | e.g. `https://vault.example.com:8200`                         |
+| `secretStore.vault.mount`               | `secret`         | KV v2 mount                                                   |
+| `secretStore.vault.pathPrefix`          | `weebo-notify`   | every key under `<pathPrefix>/<namespace>/`                   |
+| `secretStore.vault.kubernetesAuthRole`  | —                | required with an address                                      |
+| `secretStore.vault.kubernetesAuthMount` | `kubernetes`     |                                                               |
+| `secretStore.vault.caSecretRef`         | system trust     | `namespace`, `name`, `key` of a PEM bundle the operator reads |
+
+The role's policy is the hard bound: grant it only
+`<mount>/data/<pathPrefix>/*` and `<mount>/metadata/<pathPrefix>/*`. With
+`networkPolicy.egress.enabled`, allow Vault in `networkPolicy.egress.vault`.

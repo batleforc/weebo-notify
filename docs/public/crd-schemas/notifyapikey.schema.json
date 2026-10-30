@@ -1,0 +1,121 @@
+{
+  "apiVersion": "notify.weebo.io/v1alpha1",
+  "kind": "NotifyApiKey",
+  "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
+  "description": "An API key of a `NotifyServiceAccount`, minted by the operator through\nthe instance's key issuer and written to `secretTargets` as\n`NOTIFY_API_KEY` (`wnk_…`) and `NOTIFY_URL`.\n\nA key can't be read back: a lost target, a new\n`notify.weebo.io/rotate-secret` value, or a change of the service\naccount, scopes or channels mints a new key. The new key is written to\nevery target before the previous one is revoked. Deleting the CR\nrevokes its key and deletes its targets; deleting the service account\nrevokes it too.",
+  "properties": {
+    "channels": {
+      "description": "The channel ids the key may act in.",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "instanceRef": {
+      "description": "The instance: unset, the only one of this namespace. An instance of\nanother namespace must accept this one\n(`objectSelector.namespaces`).",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "scopes": {
+      "description": "What the key may do. Notify refuses a scope the service account\ndoesn't hold in every channel listed.",
+      "items": {
+        "description": "What a principal may do in a channel.",
+        "enum": [
+          "publish",
+          "subscribe",
+          "manage"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "secretTargets": {
+      "description": "Defaults to one target named after the CR, in its namespace, on the\noperator's default backend (`secretStore.defaultBackend` of its\nchart). A Vault target uses the operator's Vault connection and\nstays under `<pathPrefix>/<namespace>/`.",
+      "items": {
+        "description": "Where an emitted secret (generated password or key, OAuth2 credentials,\naccess token) is written. A CR may list several targets — the same\nvalue is fanned out to each.",
+        "properties": {
+          "backend": {
+            "default": "kubernetes",
+            "description": "`kubernetes` (default) or `vault`. A Vault target reuses the Vault\nconnection (address, mount, auth) the instance configures, which it\nmust then do.",
+            "enum": [
+              "kubernetes",
+              "vault"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Kubernetes: the `Secret` name. Vault: names the default path\n`<pathPrefix>/<namespace>/<name>` when `path` is unset.",
+            "type": "string"
+          },
+          "namespace": {
+            "description": "Kubernetes `Secret` namespace (Vault: the namespace segment of the\ndefault path). Defaults to the CR's own namespace; required on\ncluster-scoped CRs. A namespaced CR may only name its own namespace.",
+            "nullable": true,
+            "type": "string"
+          },
+          "path": {
+            "description": "Vault only: explicit KV v2 path under the instance's mount. It must\nstay under `<pathPrefix>/<namespace>/` (this object's namespace, or\nthe target's on a cluster-scoped object), unless the instance's\n`pathGrants` open it to this object.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "serviceAccountRef": {
+      "description": "The `NotifyServiceAccount` of this namespace the key acts as, bound\nto the same instance.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "channels",
+    "scopes",
+    "serviceAccountRef"
+  ],
+  "type": "object"
+}

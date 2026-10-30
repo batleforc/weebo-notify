@@ -49,6 +49,11 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`) | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
 | `ChannelNotManaged` | advisory | condition `ChannelNotManaged: True`, Event (`Normal`) | A transform names a channel id no `NotifyChannel` of the instance declares: it may be a dynamic channel (advisory). |
 | `LeavesWatchScope` | blocking | `Ready: False`, Event (`Warning`) | An update would take a CR still carrying the finalizer out of the operator's label selector (`watch.labelSelector`): refused at admission. |
+| `ServiceAccountNotReady` | blocking | `Ready: False`, Event (`Warning`) | The `NotifyServiceAccount` an API key names is missing, bound to another instance, or not yet applied by the instance's pods. |
+| `KeyIssuerUnavailable` | blocking | `Ready: False`, Event (`Warning`) | The instance's key issuer can't be used yet: its token not generated, its pods not booted with it, or Notify's API unreachable. |
+| `KeyRefused` | blocking | `Ready: False`, Event (`Warning`) | Notify refused minting the key: a scope the service account doesn't hold in one of the channels, an unknown channel, an account disabled. |
+| `SecretTargetFailed` | blocking | `Ready: False`, Event (`Warning`) | A secret store (Kubernetes or Vault) write, delete or login failed, or a target is out of the CR's reach (another namespace, a Vault path outside `<pathPrefix>/<namespace>/`, a value another CR owns). |
+| `KeyRotated` | advisory | Event (`Normal`) | A new API key was minted and written to its targets, the previous one revoked (Event only). |
 | `ConfigApplied` | advisory | Event (`Normal`) | The pods loaded a new configuration (Event only). |
 | `ConfigRolledOut` | advisory | Event (`Normal`) | The pods rolled onto a new boot configuration or image (Event only). |
 | `Migrated` | advisory | Event (`Normal`) | The database was migrated to a new version (Event only). |

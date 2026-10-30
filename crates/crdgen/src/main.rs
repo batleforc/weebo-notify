@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
     write::<api::ServiceAccount>(out, &roles, &mut kinds)?;
     write::<api::Transform>(out, &roles, &mut kinds)?;
     write::<api::TrustPolicy>(out, &roles, &mut kinds)?;
+    write::<api::ApiKey>(out, &roles, &mut kinds)?;
     // The kinds of the IDE only: the kit's shared ones (an OIDC issuer, a
     // registry mirrored…), then this operator's own, keyed by name, its
     // `spec` a Rust type with the same markers as a CRD's, e.g.

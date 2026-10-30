@@ -283,8 +283,11 @@ async fn generated_keys_are_made_once() {
     h.migrated().await;
     let fingerprint = h.objects.object("Secret", "main-fingerprint-key").unwrap();
     assert!(fingerprint.create_only);
+    let issuer = h.objects.object("Secret", "main-key-issuer").unwrap();
+    assert!(issuer.create_only);
+    // The fingerprint key and the key issuer's token.
     let made = h.keys.made();
-    assert_eq!(made, 1);
+    assert_eq!(made, 2);
     h.pass(&InstanceStatus::default()).await;
     assert_eq!(h.keys.made(), made, "no new key for an existing Secret");
 }

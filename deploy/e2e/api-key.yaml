@@ -1,0 +1,23 @@
+# The service account and its key of the kind e2e (deploy/e2e/run.sh): the
+# operator mints the key through the instance's key issuer and writes it
+# to the Secret `ci-key`.
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyServiceAccount
+metadata:
+  name: ci
+  namespace: team
+spec:
+  displayName: CI
+---
+apiVersion: notify.weebo.io/v1alpha1
+kind: NotifyApiKey
+metadata:
+  name: ci
+  namespace: team
+spec:
+  serviceAccountRef:
+    name: ci
+  scopes: [publish]
+  channels: [alerts]
+  secretTargets:
+    - name: ci-key

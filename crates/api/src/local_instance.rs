@@ -687,6 +687,11 @@ impl Names<'_> {
     pub fn sinks(&self) -> String {
         format!("{}-sinks", self.0)
     }
+    /// The generated key issuer token (`[[key_issuers]]`), which the
+    /// operator mints API keys with.
+    pub fn key_issuer(&self) -> String {
+        format!("{}-key-issuer", self.0)
+    }
 }
 
 #[cfg(test)]

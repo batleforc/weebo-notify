@@ -19,6 +19,7 @@ kinds:
   - notifyserviceaccounts
   - notifytransforms
   - notifytrustpolicies
+  - notifyapikeys
 # The namespaced kinds — all of them, the operator has no cluster-scoped
 # kind: what a team may manage (rbac.namespacedExample), and the watch
 # Role's (watch.namespace).
@@ -28,9 +29,11 @@ namespacedKinds:
   - notifyserviceaccounts
   - notifytransforms
   - notifytrustpolicies
+  - notifyapikeys
 # The operator checks the Secrets the instances and their objects name, in
 # every namespace that has one, and writes the keys it generates (the
-# sinks' fingerprint key…) and the sinks' secrets copied next to the pods:
+# sinks' fingerprint key…), the sinks' secrets copied next to the pods and
+# the API keys' Secrets (NotifyApiKey secretTargets):
 # said explicitly, also limited to one namespace.
 clusterSecrets: true
 # Kinds the admission webhook checks (`/validate`), on CREATE/UPDATE: a
@@ -43,6 +46,7 @@ admitted:
   - notifyserviceaccounts
   - notifytransforms
   - notifytrustpolicies
+  - notifyapikeys
 # Cluster-wide only: the namespaced rules below, and the labels of the
 # namespaces objects come from (objectSelector.namespaces.from: Selector).
 # Limited to one namespace, none of them: they go to watchRules. No Secret
@@ -64,6 +68,9 @@ watchRules:
 env:
   - name: WEEBO_NOTIFY_ALLOWED_IMAGES
     value: {{ join "," .Values.managedInstances.allowedImages | quote }}
+  # Where NotifyApiKeys write their keys (Kubernetes Secrets, Vault).
+  - name: WEEBO_NOTIFY_SECRET_STORE
+    value: {{ toJson .Values.secretStore | quote }}
   {{- with .Values.defaults.image }}
   - name: WEEBO_NOTIFY_DEFAULT_IMAGE
     value: {{ . | quote }}

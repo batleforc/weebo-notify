@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use api::local_instance::ObjectSelector;
 use api::status::InstanceStatus;
-pub use weebo_kit_application::test_support::FakeOwnedObjects;
+pub use weebo_kit_application::test_support::{FakeOwnedObjects, FakeSecretStore};
 
 use crate::objects::ObjectView;
 use crate::ports::{
@@ -278,5 +278,129 @@ impl crate::ports::ReplicaHealth for FakeReplicas {
         _selector: &BTreeMap<String, String>,
     ) -> Result<Vec<crate::ports::Replica>, ApiError> {
         Ok(self.replicas.lock().unwrap().clone())
+    }
+}
+
+/// Notify's key routes, in memory: the keys by id, every call logged.
+#[derive(Default)]
+pub struct FakeIssuer {
+    keys: Mutex<Vec<crate::ports::IssuedKey>>,
+    minted: Mutex<u32>,
+    /// What every call answers instead, when set.
+    error: Mutex<Option<crate::ports::NotifyApiError>>,
+    /// The bearer tokens presented.
+    pub tokens: Mutex<Vec<String>>,
+}
+
+impl FakeIssuer {
+    pub fn keys(&self) -> Vec<crate::ports::IssuedKey> {
+        self.keys.lock().unwrap().clone()
+    }
+
+    /// The keys not revoked.
+    pub fn live(&self) -> Vec<crate::ports::IssuedKey> {
+        self.keys().into_iter().filter(|k| !k.revoked).collect()
+    }
+
+    pub fn insert(&self, key: crate::ports::IssuedKey) {
+        self.keys.lock().unwrap().push(key);
+    }
+
+    pub fn fail(&self, error: Option<crate::ports::NotifyApiError>) {
+        *self.error.lock().unwrap() = error;
+    }
+
+    fn call(&self, token: &str) -> Result<(), crate::ports::NotifyApiError> {
+        self.tokens.lock().unwrap().push(token.to_string());
+        match self.error.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ports::KeyIssuer for FakeIssuer {
+    async fn list(
+        &self,
+        _endpoint: &str,
+        token: &str,
+    ) -> Result<Vec<crate::ports::IssuedKey>, crate::ports::NotifyApiError> {
+        self.call(token)?;
+        Ok(self.keys())
+    }
+
+    async fn mint(
+        &self,
+        _endpoint: &str,
+        token: &str,
+        key: &crate::ports::NewKey,
+    ) -> Result<crate::ports::MintedKey, crate::ports::NotifyApiError> {
+        self.call(token)?;
+        let n = {
+            let mut minted = self.minted.lock().unwrap();
+            *minted = minted.saturating_add(1);
+            *minted
+        };
+        let issued = crate::ports::IssuedKey {
+            id: format!("key-{n}"),
+            prefix: format!("p{n}"),
+            label: Some(key.label.clone()),
+            service_account: Some(key.service_account.clone()),
+            scopes: key.scopes.clone(),
+            channels: key.channels.clone(),
+            revoked: false,
+        };
+        self.insert(issued.clone());
+        Ok(crate::ports::MintedKey {
+            secret: format!("wnk_p{n}_secret"),
+            key: issued,
+        })
+    }
+
+    async fn revoke(
+        &self,
+        _endpoint: &str,
+        token: &str,
+        id: &str,
+    ) -> Result<(), crate::ports::NotifyApiError> {
+        self.call(token)?;
+        for key in self.keys.lock().unwrap().iter_mut() {
+            if key.id == id {
+                key.revoked = true;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `NotifyServiceAccount`s by `(namespace, name)`.
+#[derive(Default)]
+pub struct FakeAccounts {
+    accounts: Mutex<BTreeMap<(String, String), crate::ports::AccountView>>,
+}
+
+impl FakeAccounts {
+    pub fn insert(&self, namespace: &str, name: &str, account: crate::ports::AccountView) {
+        self.accounts
+            .lock()
+            .unwrap()
+            .insert((namespace.into(), name.into()), account);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ports::ServiceAccounts for FakeAccounts {
+    async fn get(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Option<crate::ports::AccountView>, ApiError> {
+        Ok(self
+            .accounts
+            .lock()
+            .unwrap()
+            .get(&(namespace.to_string(), name.to_string()))
+            .cloned())
     }
 }

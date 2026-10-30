@@ -45,6 +45,15 @@
     ]
   },
   {
+    "kind": "NotifyApiKey",
+    "singular": "notifyapikey",
+    "scope": "Namespaced",
+    "apiVersion": "notify.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
+  },
+  {
     "kind": "Database",
     "singular": "database",
     "scope": "Namespaced",

@@ -16,6 +16,7 @@ export default defineConfig({
     "NotifyServiceAccount",
     "NotifyTransform",
     "NotifyTrustPolicy",
+    "NotifyApiKey",
   ],
   // The guide that explains each kind, linked from its reference page.
   guides: {
@@ -24,6 +25,7 @@ export default defineConfig({
     NotifyServiceAccount: install,
     NotifyTransform: install,
     NotifyTrustPolicy: install,
+    NotifyApiKey: ["API keys", "/docs/guides/api-keys"],
   },
   // A minimal, realistic `spec` per kind, checked against the schema (every
   // required field present, every key a real field): a renamed field fails
@@ -71,6 +73,12 @@ export default defineConfig({
       subject: "repo:acme/app:ref:refs/heads/main",
       channels: ["alerts"],
       scopes: ["publish"],
+    },
+    NotifyApiKey: {
+      serviceAccountRef: { name: "grafana" },
+      scopes: ["publish"],
+      channels: ["alerts"],
+      secretTargets: [{ name: "grafana-notify" }],
     },
   },
   // The operator reference pages (content/docs/reference/), generated from

@@ -3,11 +3,13 @@
 //! instances only); the objects of an instance are the kit's
 //! [`OwnedObjects`].
 
+use api::common::Scope;
 use api::local_instance::ObjectSelector;
 use domain::error::ReasonCode;
 pub use weebo_kit_application::instances::{
     BoundInstance, InstanceDirectory, InstanceError, ResolveError,
 };
+pub use weebo_kit_application::ports::{SecretOwner, SecretStore, SecretStoreError};
 pub use weebo_kit_application::workload::{OwnedObject, OwnedObjects, Owner, WorkloadError};
 
 use crate::objects::ObjectView;
@@ -203,4 +205,87 @@ pub trait ReplicaHealth: Send + Sync {
         namespace: &str,
         selector: &std::collections::BTreeMap<String, String>,
     ) -> Result<Vec<Replica>, ApiError>;
+}
+
+/// A key as Notify lists it (`GET /api/v1/apikeys`), metadata only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssuedKey {
+    pub id: String,
+    /// The `<prefix>` of `wnk_<prefix>_<secret>`.
+    pub prefix: String,
+    pub label: Option<String>,
+    /// The service account it acts as (`None`: a user's or a channel's).
+    pub service_account: Option<String>,
+    pub scopes: Vec<Scope>,
+    pub channels: Vec<String>,
+    pub revoked: bool,
+}
+
+/// A key to mint for a managed service account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewKey {
+    pub service_account: String,
+    pub label: String,
+    pub scopes: Vec<Scope>,
+    pub channels: Vec<String>,
+}
+
+/// A key just minted: the only time its secret is seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MintedKey {
+    pub key: IssuedKey,
+    /// `wnk_<prefix>_<secret>`.
+    pub secret: String,
+}
+
+/// Why a call to Notify's API failed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NotifyApiError {
+    /// 401: the token isn't (yet) one Notify's pods accept.
+    #[error("Notify refused the key issuer: {0}")]
+    Unauthorized(String),
+    /// 400/403/404/422: Notify refused what was asked.
+    #[error("Notify refused: {0}")]
+    Refused(String),
+    /// Unreachable, timing out, a 5xx, an answer that doesn't read.
+    #[error("Notify's API: {0}")]
+    Failed(String),
+}
+
+/// Notify's key routes, as the instance's key issuer (ADR-0033): mint,
+/// list and revoke the keys of managed service accounts, nothing else.
+#[async_trait::async_trait]
+pub trait KeyIssuer: Send + Sync {
+    /// Every managed service account's keys, revoked ones included.
+    async fn list(&self, endpoint: &str, token: &str) -> Result<Vec<IssuedKey>, NotifyApiError>;
+    async fn mint(
+        &self,
+        endpoint: &str,
+        token: &str,
+        key: &NewKey,
+    ) -> Result<MintedKey, NotifyApiError>;
+    /// Idempotent: a key already gone is not an error.
+    async fn revoke(&self, endpoint: &str, token: &str, id: &str) -> Result<(), NotifyApiError>;
+}
+
+/// A `NotifyServiceAccount` as an API key sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountView {
+    /// `status.id`: none until its controller resolved it.
+    pub id: Option<String>,
+    pub instance: Option<BoundInstance>,
+    /// `Ready: True`: every pod of its instance applied it.
+    pub ready: bool,
+}
+
+/// The `NotifyServiceAccount`s API keys name.
+#[async_trait::async_trait]
+pub trait ServiceAccounts: Send + Sync {
+    async fn get(&self, namespace: &str, name: &str) -> Result<Option<AccountView>, ApiError>;
+}
+
+/// Where API keys are written: a store per pass (Kubernetes `Secret`s, or
+/// the operator's Vault, logged in to once and cached across passes).
+pub trait SecretStores: Send + Sync {
+    fn store(&self) -> std::sync::Arc<dyn SecretStore>;
 }

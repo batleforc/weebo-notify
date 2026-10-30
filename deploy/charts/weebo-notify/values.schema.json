@@ -743,6 +743,55 @@
         }
       }
     },
+    "secretStore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultBackend": {
+          "type": "string",
+          "enum": [
+            "kubernetes",
+            "vault"
+          ]
+        },
+        "vault": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "mount": {
+              "type": "string"
+            },
+            "pathPrefix": {
+              "type": "string"
+            },
+            "kubernetesAuthRole": {
+              "type": "string"
+            },
+            "kubernetesAuthMount": {
+              "type": "string"
+            },
+            "caSecretRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "namespace": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "managedInstances": {
       "type": "object",
       "additionalProperties": false,

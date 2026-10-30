@@ -4,8 +4,10 @@
 # chart into the current kube context, then walks the golden path — a
 # NotifyLocalInstance runs the real Notify (migration Job, server, web), a
 # NotifyChannel reaches its pods, Alice publishes to it with her Dex token
-# and reads it back, the channel's deletion archives it (its history stays)
-# — and checks the instance's deletion.
+# and reads it back, a NotifyApiKey's key (minted by the operator, written
+# to a Secret) publishes too and is revoked with its CR, the channel's
+# deletion archives it (its history stays) — and checks the instance's
+# deletion.
 #
 # Env: IMAGE (operator image already loaded in the cluster, default
 # weebo-notify-operator:e2e), CERT_MANAGER_VERSION (default: the pinned
@@ -41,7 +43,7 @@ dump() {
   step "diagnostics"
   kubectl -n "$OPERATOR_NS" get pods -o wide
   kubectl -n "$OPERATOR_NS" logs -l app.kubernetes.io/name=weebo-notify --tail=200 --prefix --all-containers
-  kubectl -n team get notifylocalinstances,notifychannels -o yaml
+  kubectl -n team get notifylocalinstances,notifychannels,notifyserviceaccounts,notifyapikeys -o yaml
   kubectl -n team get all,jobs
   kubectl -n team logs -l app.kubernetes.io/name=notify --tail=100 --prefix --all-containers
   kubectl -n notify-deps get pods -o wide
@@ -147,6 +149,7 @@ notify() {
 # Her first request makes her a user: an `oidcSub` binding resolves only
 # to someone who has logged in.
 notify /me >/dev/null
+kubectl apply -f "$HERE/api-key.yaml"
 sed "s|__SUB__|$SUB|" "$HERE/channel.yaml" | kubectl apply -f -
 ready -n team notifychannel/alerts
 
@@ -166,6 +169,27 @@ done
 [ -n "$published" ] || fail "Alice could never publish to alerts"
 notify '/notifications?channels=alerts' \
   | jq -e 'any(.items[]; .head.content.title == "e2e")' >/dev/null || fail "not in Alice's inbox"
+
+step "an API key: minted into a Secret, it publishes, revoked with its CR"
+ready -n team notifyserviceaccount/ci
+ready -n team notifyapikey/ci
+KEY="$(kubectl -n team get secret ci-key -o jsonpath='{.data.NOTIFY_API_KEY}' | base64 -d)"
+[[ "$KEY" == wnk_* ]] || fail "ci-key holds no Notify key"
+[ "$(kubectl -n team get secret ci-key -o jsonpath='{.data.NOTIFY_URL}' | base64 -d)" = \
+  "http://main.team.svc:8080" ] || fail "ci-key's NOTIFY_URL is not the instance's"
+publish_with_key() {
+  curl -fsS -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+    http://127.0.0.1:18080/api/v1/notifications -X POST \
+    -d '{"channel": "alerts", "title": "from ci", "state": "open", "status": "info"}'
+}
+publish_with_key | jq -e '.notification.channel == "alerts"' >/dev/null || fail "the key could not publish"
+notify '/notifications?channels=alerts' \
+  | jq -e 'any(.items[]; .head.content.title == "from ci")' >/dev/null || fail "the key's notification is not in Alice's inbox"
+kubectl -n team delete notifyapikey ci --wait --timeout="$WAIT"
+kubectl -n team get secret ci-key >/dev/null 2>&1 && fail "ci-key outlived its NotifyApiKey"
+publish_with_key >/dev/null 2>&1 && fail "the key still publishes after its NotifyApiKey was deleted"
+# Its account too: an instance waits for every object bound to it.
+kubectl -n team delete notifyserviceaccount ci --wait --timeout="$WAIT"
 
 step "deleting the channel archives it (onRemoved: Archive, the default)"
 kubectl -n team delete notifychannel alerts --wait --timeout="$WAIT"

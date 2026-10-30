@@ -92,6 +92,25 @@ weebo_kit_domain::reason_codes! {
         /// the operator's label selector (`watch.labelSelector`): refused
         /// at admission.
         LeavesWatchScope,
+        /// The `NotifyServiceAccount` an API key names is missing, bound to
+        /// another instance, or not yet applied by the instance's pods.
+        ServiceAccountNotReady,
+        /// The instance's key issuer can't be used yet: its token not
+        /// generated, its pods not booted with it, or Notify's API
+        /// unreachable.
+        KeyIssuerUnavailable,
+        /// Notify refused minting the key: a scope the service account
+        /// doesn't hold in one of the channels, an unknown channel, an
+        /// account disabled.
+        KeyRefused,
+        /// A secret store (Kubernetes or Vault) write, delete or login
+        /// failed, or a target is out of the CR's reach (another
+        /// namespace, a Vault path outside `<pathPrefix>/<namespace>/`,
+        /// a value another CR owns).
+        SecretTargetFailed,
+        /// A new API key was minted and written to its targets, the
+        /// previous one revoked (Event only).
+        KeyRotated,
         /// The pods loaded a new configuration (Event only).
         ConfigApplied,
         /// The pods rolled onto a new boot configuration or image (Event
@@ -127,6 +146,7 @@ impl ReasonCode {
             | ReasonCode::MonitoringUnavailable
             | ReasonCode::RestartPending
             | ReasonCode::ApiNotExposed
+            | ReasonCode::KeyRotated
             | ReasonCode::ConfigApplied
             | ReasonCode::ConfigRolledOut
             | ReasonCode::Migrated
@@ -178,6 +198,7 @@ mod tests {
                 &ReasonCode::RestartPending,
                 &ReasonCode::ApiNotExposed,
                 &ReasonCode::ChannelNotManaged,
+                &ReasonCode::KeyRotated,
                 &ReasonCode::ConfigApplied,
                 &ReasonCode::ConfigRolledOut,
                 &ReasonCode::Migrated,
