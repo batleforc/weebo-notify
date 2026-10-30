@@ -183,6 +183,11 @@ et n'entre pas dans la garde `max_removals`.
 
 - Chart de l'opérateur = enveloppe de `weebo-operator-lib` ; il porte une
   seule fois la PrometheusRule et le dashboard Grafana de notify.
+  Le ServiceMonitor de chaque instance pose le label `notify_instance`
+  (relabeling) : règles et dashboard sélectionnent dessus et groupent par
+  `(namespace, notify_instance)` (`notify.prometheusRule`,
+  `notify.grafanaDashboard`). Non repris : le ratio 5xx (ingress-nginx) et
+  le flapping de readiness (kube-state-metrics), sans ce label.
 - `charts/weebo-notify` reste dans notify-v2 pour qui n'utilise pas
   l'opérateur ; aucun template partagé. Sa dépréciation sera revue quand
   l'opérateur fera tourner les clusters.

@@ -6,6 +6,7 @@
     "---Getting started---",
     "guides/install",
     "guides/migrate-from-helm-chart",
+    "guides/monitoring",
     "---Reference---",
     "...crds",
     "reference"

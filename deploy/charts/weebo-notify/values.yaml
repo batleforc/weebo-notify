@@ -332,3 +332,33 @@ managedInstances:
   allowedImages:
     - ghcr.io/batleforc/weebo-notify-v2
     - ghcr.io/batleforc/weebo-notify-v2-web
+
+# Notify's own alerts and dashboard (weebo-notify-v2's), once for every
+# NotifyLocalInstance: they read the instances' ServiceMonitors
+# (`spec.serviceMonitor`, on by default), which label every series
+# `notify_instance`.
+notify:
+  prometheusRule:
+    # -- A PrometheusRule with Notify's alerts, per instance (needs the
+    # monitoring.coreos.com CRDs).
+    enabled: false
+    # -- Whatever your Prometheus's ruleSelector matches (e.g. `release:
+    # kube-prometheus-stack`).
+    labels: {}
+    # -- Added to every alert (routing, a team label).
+    additionalLabels: {}
+    # -- The 60-second jobs alert after ten missed passes.
+    jobStaleSeconds: 600
+    pushFailureRatio: 0.2
+    dlqDepth: 0
+    # -- Below the gauge's cap of 100000 per kind, or it never fires.
+    retentionBacklogRows: 50000
+  grafanaDashboard:
+    # -- A ConfigMap holding Notify's dashboard, for the Grafana sidecar.
+    enabled: false
+    # -- Where the sidecar looks; empty: the release's namespace.
+    namespace: ""
+    # -- The label kube-prometheus-stack's Grafana sidecar watches.
+    labels:
+      grafana_dashboard: "1"
+    annotations: {}
