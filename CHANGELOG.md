@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.2.0](https://github.com/batleforc/weebo-notify/compare/85e525ab4667cc06360c12b5b8510af4c3d9e670..v0.2.0) - 2026-10-30
+#### Features
+- NotifyApiKey, a service account's key minted into Secrets or Vault (#3) - ([85e525a](https://github.com/batleforc/weebo-notify/commit/85e525ab4667cc06360c12b5b8510af4c3d9e670)) - Maxime, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5, Claude Opus 5.5
+
+- - -
+
 ## [v0.1.0](https://github.com/batleforc/weebo-notify/compare/6f33aaf310ebe3f55511d771a8968dba0088dfb7..v0.1.0) - 2026-10-30
 #### Features
 - (**chart**) Notify's alerts and dashboard, once for every instance (#2) - ([18d4eb0](https://github.com/batleforc/weebo-notify/commit/18d4eb0edc41156c75827727abc3981d83d3f1cb)) - Maxime, Claude Opus 5.5
