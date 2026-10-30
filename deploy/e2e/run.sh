@@ -188,6 +188,8 @@ notify '/notifications?channels=alerts' \
 kubectl -n team delete notifyapikey ci --wait --timeout="$WAIT"
 kubectl -n team get secret ci-key >/dev/null 2>&1 && fail "ci-key outlived its NotifyApiKey"
 publish_with_key >/dev/null 2>&1 && fail "the key still publishes after its NotifyApiKey was deleted"
+# Its account too: an instance waits for every object bound to it.
+kubectl -n team delete notifyserviceaccount ci --wait --timeout="$WAIT"
 
 step "deleting the channel archives it (onRemoved: Archive, the default)"
 kubectl -n team delete notifychannel alerts --wait --timeout="$WAIT"
