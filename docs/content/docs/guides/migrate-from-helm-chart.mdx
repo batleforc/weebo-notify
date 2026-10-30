@@ -51,15 +51,15 @@ kubectl -n notify label secret <secret>... notify.weebo.io/credential=true
 | `server.channels.onRemoved`                                   | `channels.onRemoved` (`Archive`, `Delete`)                               |
 | `server.corsOrigins`                                          | `server.corsOrigins` (the web UI's origin is added for you)              |
 | `server.ingress.host`, `web.ingress.host`, `className`        | `ingress.api.host`, `ingress.web.host`, `ingress.className`              |
-| `server.serviceMonitor.enabled`                               | `serviceMonitor.enabled`                                                 |
+| `server.serviceMonitor.enabled`                               | `serviceMonitor.enabled` (on by default)                                 |
 | `networkPolicy.ingressFrom`, `networkPolicy.egress`           | `networkPolicy.ingressFrom`, `networkPolicy.egressTo` (always on)        |
 | `server.extraConfig`, any other key (`push.apns`, …)          | `extraConfig`, minus what the CRs below own                              |
 
 `migrations.job`, `server.channels.reload` and the probes have no field:
 the operator runs the migrations itself, Notify reloads its file when it
 changes, and the probes are Notify's own. The chart's `prometheusRule`
-and `grafanaDashboard` have no equivalent yet: keep them as they were
-rendered by the chart.
+and `grafanaDashboard` move to the operator's chart, once for every
+instance ([Monitoring](/docs/guides/monitoring)).
 
 ## `extraConfig` to CRs
 

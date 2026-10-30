@@ -318,6 +318,11 @@ fn the_service_monitor_scrapes_the_server_service() {
         json!(selector("main", "server"))
     );
     assert_eq!(monitor.manifest["spec"]["endpoints"][0]["path"], "/metrics");
+    // The chart's alerts and dashboard tell the instances apart by it.
+    assert_eq!(
+        monitor.manifest["spec"]["endpoints"][0]["relabelings"][0],
+        json!({"targetLabel": "notify_instance", "replacement": "main", "action": "replace"})
+    );
 }
 
 #[test]

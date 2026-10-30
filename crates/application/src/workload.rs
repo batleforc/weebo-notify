@@ -837,6 +837,11 @@ pub fn objects(input: &WorkloadInput<'_>) -> Vec<OwnedObject> {
     out
 }
 
+/// The label every series of an instance's server carries: its name. The
+/// operator chart's alerts and dashboard (`notify.prometheusRule`,
+/// `notify.grafanaDashboard`) select and group on it.
+pub const INSTANCE_METRIC_LABEL: &str = "notify_instance";
+
 /// The `ServiceMonitor` (`monitoring.coreos.com/v1`), when enabled.
 pub fn service_monitor(input: &WorkloadInput<'_>) -> Option<OwnedObject> {
     let monitor = &input.spec.service_monitor;
@@ -856,7 +861,15 @@ pub fn service_monitor(input: &WorkloadInput<'_>) -> Option<OwnedObject> {
             "metadata": {"name": name, "namespace": input.namespace, "labels": labels},
             "spec": {
                 "selector": {"matchLabels": selector(input.name, "server")},
-                "endpoints": [{"port": "http", "path": "/metrics"}],
+                "endpoints": [{
+                    "port": "http",
+                    "path": "/metrics",
+                    "relabelings": [{
+                        "targetLabel": INSTANCE_METRIC_LABEL,
+                        "replacement": input.name,
+                        "action": "replace",
+                    }],
+                }],
             },
         }),
         create_only: false,

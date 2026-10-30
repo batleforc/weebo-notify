@@ -1,0 +1,29 @@
+{{/*
+Notify's dashboard (weebo-notify-v2's chart), once for every
+NotifyLocalInstance, as a ConfigMap for the Grafana sidecar. The JSON lives in
+dashboards/ so it can be edited in Grafana, exported and dropped back in; its
+`instance` variable reads the `notify_instance` label of the instances'
+ServiceMonitors.
+*/}}
+{{- $dashboard := .Values.notify.grafanaDashboard }}
+{{- if $dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "weebo-operator.fullname" . }}-notify-dashboard
+  {{- with $dashboard.namespace }}
+  namespace: {{ . }}
+  {{- end }}
+  labels:
+    {{- include "weebo-operator.labels" . | nindent 4 }}
+    {{- with $dashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $dashboard.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  weebo-notify.json: |-
+    {{- .Files.Get "dashboards/weebo-notify.json" | nindent 4 }}
+{{- end }}

@@ -1,0 +1,124 @@
+{{/*
+Notify's own alerts (weebo-notify-v2's chart, observability.mdx), once for
+every NotifyLocalInstance: the operator's ServiceMonitor of an instance
+(`spec.serviceMonitor`) labels its series `notify_instance`, and every rule
+selects on it and groups by (namespace, notify_instance), so each instance
+alerts on its own. Each alert names its runbook section.
+
+Several families are reported by the LEADER only (sink_dlq_depth,
+retention_backlog_rows, the job timestamps): a follower's series is absent or
+frozen at its last term, so every rule aggregates with max() across replicas.
+
+Not ported: the ingress-nginx 5xx ratio and the readiness flapping (they read
+another exporter's series, which carry no `notify_instance`).
+*/}}
+{{- $rules := .Values.notify.prometheusRule }}
+{{- if $rules.enabled }}
+{{- $sel := "notify_instance!=\"\"" }}
+{{- $by := "namespace, notify_instance" }}
+{{- $runbook := "https://github.com/batleforc/weebo-notify-v2/blob/main/docs/content/docs/ops/runbooks.mdx" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "weebo-operator.fullname" . }}-notify
+  labels:
+    {{- include "weebo-operator.labels" . | nindent 4 }}
+    {{- with $rules.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: weebo-notify.leader
+      rules:
+        # sink-drain is the leader's 5-second loop: when it stops moving, nobody
+        # holds the lock — every leader-only job has stopped with it.
+        - alert: WeeboNotifyNoLeader
+          expr: |
+            time() - max by ({{ $by }}) (background_job_last_success_timestamp_seconds{ {{- $sel }},task="sink-drain"}) > 120
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "No replica of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} is running the leader-only background jobs"
+            runbook_url: {{ $runbook }}#leader-lock-lost-or-stuck
+        - alert: WeeboNotifyBackgroundJobStale
+          expr: |
+            time() - max by ({{ $by }}, task) (background_job_last_success_timestamp_seconds{ {{- $sel }}}) > {{ $rules.jobStaleSeconds }}
+          for: 5m
+          labels:
+            severity: warning
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "Background job {{`{{ $labels.task }}`}} of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} has not completed a pass in {{ $rules.jobStaleSeconds }}s"
+            runbook_url: {{ $runbook }}#leader-lock-lost-or-stuck
+        - alert: WeeboNotifyBackgroundJobFailing
+          expr: |
+            sum by ({{ $by }}, task) (increase(background_job_failures_total{ {{- $sel }}}[15m])) > 3
+          labels:
+            severity: warning
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "Background job {{`{{ $labels.task }}`}} of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} is failing repeatedly"
+            runbook_url: {{ $runbook }}#leader-lock-lost-or-stuck
+    - name: weebo-notify.delivery
+      rules:
+        - alert: WeeboNotifySinkDeadLetters
+          expr: |
+            max by ({{ $by }}, channel) (sink_dlq_depth{ {{- $sel }}}) > {{ $rules.dlqDepth }}
+          for: 15m
+          labels:
+            severity: warning
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "Sink deliveries dead-lettered on channel {{`{{ $labels.channel }}`}} of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}}"
+            runbook_url: {{ $runbook }}#sink-dead-letter-triage
+        - alert: WeeboNotifySinkDeadLettersGrowing
+          expr: |
+            max by ({{ $by }}, channel) (deriv(sink_dlq_depth{ {{- $sel }}}[30m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "Dead letters on channel {{`{{ $labels.channel }}`}} of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} have grown for 30 minutes"
+            runbook_url: {{ $runbook }}#sink-dead-letter-triage
+        - alert: WeeboNotifyPushFailureRatio
+          expr: |
+            sum by ({{ $by }}, transport) (rate(push_failures_total{ {{- $sel }}}[15m]))
+              / sum by ({{ $by }}, transport) (rate(push_delivery_duration_seconds_count{ {{- $sel }}}[15m]))
+              > {{ $rules.pushFailureRatio }}
+          for: 15m
+          labels:
+            severity: warning
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "Over {{ mulf $rules.pushFailureRatio 100 }}% of {{`{{ $labels.transport }}`}} pushes of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} fail"
+            runbook_url: {{ $runbook }}#key-rotation
+    - name: weebo-notify.retention
+      rules:
+        - alert: WeeboNotifyRetentionBacklog
+          expr: |
+            max by ({{ $by }}, kind) (retention_backlog_rows{ {{- $sel }}}) > {{ $rules.retentionBacklogRows | int }}
+          for: 1h
+          labels:
+            severity: warning
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "{{`{{ $value }}`}} {{`{{ $labels.kind }}`}} rows of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} past retention are waiting for the purge"
+            runbook_url: {{ $runbook }}#retention-backlog
+    - name: weebo-notify.availability
+      rules:
+        # Per instance, among the targets its ServiceMonitor discovers (not
+        # ready pods included): none answers.
+        - alert: WeeboNotifyDown
+          expr: |
+            max by ({{ $by }}) (up{ {{- $sel }}}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            {{- with $rules.additionalLabels }}{{ toYaml . | nindent 12 }}{{ end }}
+          annotations:
+            summary: "No server replica of {{`{{ $labels.namespace }}/{{ $labels.notify_instance }}`}} is being scraped successfully"
+            runbook_url: {{ $runbook }}#postgres-failover-and-pooler-breakage
+{{- end }}

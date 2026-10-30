@@ -1,0 +1,44 @@
+---
+title: Monitoring
+description: Notify's alerts and dashboard for every instance, and the operator's own.
+---
+
+Each `NotifyLocalInstance` gets a `ServiceMonitor` on its server
+(`spec.serviceMonitor.enabled`, on by default; `spec.serviceMonitor.labels`
+for your Prometheus's `serviceMonitorSelector`). It labels every series of
+the instance `notify_instance: <instance name>`.
+
+The operator's chart ships Notify's alerts and dashboard once, for every
+instance, on that label:
+
+```bash
+helm upgrade weebo-notify oci://ghcr.io/batleforc/charts/weebo-notify \
+  --reuse-values \
+  --set notify.prometheusRule.enabled=true \
+  --set notify.prometheusRule.labels.release=kube-prometheus-stack \
+  --set notify.grafanaDashboard.enabled=true
+```
+
+| Alert                               | Fires when, for one instance                                       |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `WeeboNotifyNoLeader`               | the leader's 5-second loop hasn't run for 2 minutes                |
+| `WeeboNotifyBackgroundJobStale`     | a background job hasn't completed a pass in `jobStaleSeconds`      |
+| `WeeboNotifyBackgroundJobFailing`   | a background job failed more than 3 times in 15 minutes            |
+| `WeeboNotifySinkDeadLetters`        | a channel holds more than `dlqDepth` dead letters                  |
+| `WeeboNotifySinkDeadLettersGrowing` | a channel's dead letters keep growing for 30 minutes               |
+| `WeeboNotifyPushFailureRatio`       | more than `pushFailureRatio` of a transport's pushes fail          |
+| `WeeboNotifyRetentionBacklog`       | more than `retentionBacklogRows` rows wait for the purge           |
+| `WeeboNotifyDown`                   | none of its server pods is scraped successfully                    |
+
+Each names its section of
+[Notify's runbooks](https://github.com/batleforc/weebo-notify-v2/blob/main/docs/content/docs/ops/runbooks.mdx).
+The dashboard (`weebo-notify (instances)`) picks a namespace, then one
+instance or all of them.
+
+Two alerts of Notify's own chart are not shipped: the 5xx ratio (it reads
+ingress-nginx's series) and the readiness flapping (kube-state-metrics'):
+they carry no `notify_instance`.
+
+The operator's own alerts are the chart's
+`prometheusRule`, its metrics are listed in
+[Metrics & health](/docs/reference/metrics).
