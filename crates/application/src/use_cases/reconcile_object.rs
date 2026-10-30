@@ -99,9 +99,9 @@ async fn run(
                 });
             }
             // Confirmed by the instance itself, for this generation: never
-            // inferred from its hashes, which move in separate writes.
-            // TODO(2c): the instance sets `appliedGeneration` once every
-            // pod reports the digest in `/healthz`.
+            // inferred from its hashes, which move in separate writes: the
+            // instance sets `appliedGeneration` once every pod reports the
+            // digest in `/healthz` (ADR-0032).
             if render.applied_generation.is_some() && render.applied_generation == pass.generation {
                 Ok(format!("applied by every pod of {bound}"))
             } else {
