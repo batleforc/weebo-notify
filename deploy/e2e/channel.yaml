@@ -10,3 +10,5 @@ spec:
   access:
     - oidcSub: "__SUB__"
       scopes: [publish, subscribe]
+    - serviceAccount: ci
+      scopes: [publish]

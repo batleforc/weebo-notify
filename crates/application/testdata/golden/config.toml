@@ -57,6 +57,10 @@ migrate_on_start = false
 [federation]
 signing_key_file = "/var/run/notify/federation/key"
 
+[[key_issuers]]
+id = "weebo-notify-operator"
+token = "env:WNK_KEY_ISSUER_TOKEN"
+
 [oidc]
 client_id = "notify"
 issuer = "https://id.example"

@@ -1,8 +1,10 @@
-//! The validating webhook (`POST /validate`): the five kinds checked on
-//! `CREATE`/`UPDATE` by `application::admission` — what Notify's own model
+//! The validating webhook (`POST /validate`): the instance and the four
+//! rendered kinds checked on `CREATE`/`UPDATE` by
+//! `application::admission` — what Notify's own model
 //! refuses is refused with Notify's message; what may resolve itself (a
 //! Secret not created yet, no instance yet, an id an older object holds)
-//! is admitted with a warning `kubectl` shows.
+//! is admitted with a warning `kubectl` shows. A `NotifyApiKey`'s targets
+//! must stay in its namespace.
 //!
 //! Served by the kit's `admission::router` ([`crate::webhook`]): a
 //! `DELETE` is always allowed (a cleanup is never stranded), an `UPDATE`
@@ -23,6 +25,8 @@ use domain::error::ReasonCode;
 use kube::ResourceExt;
 use kube::core::DynamicObject;
 use weebo_kit_api::{BoundInstance, InstanceRef};
+use weebo_kit_application::emit;
+use weebo_kit_application::ports::SecretOwner;
 use weebo_kit_runtime::admission::{Admission, Denial, typed};
 
 pub struct NotifyAdmission {
@@ -96,6 +100,14 @@ impl NotifyAdmission {
                 ObjectSpec::TrustPolicy,
                 |t| t.status.as_ref()?.instance.clone(),
             )?,
+            api::kinds::API_KEY => {
+                let key: api::ApiKey = typed(object).map_err(invalid)?;
+                let name = object.name_any();
+                let owner = SecretOwner::namespaced(api::kinds::API_KEY, namespace, &name);
+                emit::check_targets(&key.spec.secret_targets, &owner)
+                    .map_err(|e| Failure::new(ReasonCode::SecretTargetFailed, e.to_string()))?;
+                return Ok(Vec::new());
+            }
             "NotifyLocalInstance" => {
                 let instance: api::LocalInstance = typed(object).map_err(invalid)?;
                 return check_instance(
@@ -313,5 +325,34 @@ mod tests {
             .0
         );
         assert!(!answer(&handle(&admission, review("CREATE", "Other", object, None)).await).0);
+    }
+
+    #[tokio::test]
+    async fn an_api_key_writes_only_into_its_namespace() {
+        let key = |target: Value| {
+            json!({
+                "apiVersion": "notify.weebo.io/v1alpha1", "kind": "NotifyApiKey",
+                "metadata": {"name": "deploy", "namespace": "team"},
+                "spec": {"serviceAccountRef": {"name": "ci"}, "scopes": ["publish"],
+                         "channels": ["alerts"], "secretTargets": [target]},
+            })
+        };
+        let admission = admission();
+        let own = review(
+            "CREATE",
+            "NotifyApiKey",
+            key(json!({"name": "creds"})),
+            None,
+        );
+        assert!(answer(&handle(&admission, own).await).0);
+        let other = review(
+            "CREATE",
+            "NotifyApiKey",
+            key(json!({"name": "creds", "namespace": "prod"})),
+            None,
+        );
+        let (allowed, response) = answer(&handle(&admission, other).await);
+        assert!(!allowed);
+        assert_eq!(response["status"]["reason"], "SecretTargetFailed");
     }
 }

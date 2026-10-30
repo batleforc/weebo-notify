@@ -6,6 +6,7 @@
     "notifychannel",
     "notifyserviceaccount",
     "notifytransform",
-    "notifytrustpolicy"
+    "notifytrustpolicy",
+    "notifyapikey"
   ]
 }

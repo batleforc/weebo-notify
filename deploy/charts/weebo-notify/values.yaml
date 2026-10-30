@@ -333,6 +333,34 @@ managedInstances:
     - ghcr.io/batleforc/weebo-notify-v2
     - ghcr.io/batleforc/weebo-notify-v2-web
 
+# Where NotifyApiKeys write their keys (env WEEBO_NOTIFY_SECRET_STORE):
+# Kubernetes Secrets, or this Vault. The Vault connection is the
+# operator's, set here by whoever installs it, never by an instance: every
+# key writes under `<pathPrefix>/<its namespace>/` and nowhere else. Allow
+# the operator to reach Vault with `networkPolicy.egress.vault`.
+secretStore:
+  # -- `kubernetes` or `vault`: the backend of a key without
+  # `secretTargets` (a target may name its own `backend`).
+  defaultBackend: kubernetes
+  vault:
+    # -- Vault's address, e.g. `https://vault.example.com:8200`. Empty: no
+    # Vault, a `vault` target fails `SecretTargetFailed`.
+    address: ""
+    # -- KV v2 mount the keys are written under.
+    mount: secret
+    # -- Default path of a target: `<pathPrefix>/<namespace>/<name>`; an
+    # explicit `path` must stay under `<pathPrefix>/<namespace>/`.
+    pathPrefix: weebo-notify
+    # -- Vault Kubernetes-auth role the operator logs in as, with its own
+    # ServiceAccount token. Its policy is the hard bound: grant it
+    # `<mount>/data/<pathPrefix>/*` and `<mount>/metadata/<pathPrefix>/*`.
+    kubernetesAuthRole: ""
+    # -- Mount of Vault's Kubernetes auth backend.
+    kubernetesAuthMount: kubernetes
+    # -- A PEM bundle to verify Vault's TLS with (`namespace`, `name`,
+    # `key` of a Secret the operator can read); unset: the system's.
+    caSecretRef: {}
+
 # Notify's own alerts and dashboard (weebo-notify-v2's), once for every
 # NotifyLocalInstance: they read the instances' ServiceMonitors
 # (`spec.serviceMonitor`, on by default), which label every series

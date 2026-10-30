@@ -113,7 +113,22 @@ connue n'est pas refusé (il peut être dynamique) mais donne un avis sur
 la CR. Rechargeable à chaud, sans état en base : le retrait est immédiat
 et n'entre pas dans la garde `max_removals`.
 
-**`NotifyApiKey`** : v0.2 (voir notify-v2, ADR-0033).
+**`NotifyApiKey`** (v0.2, ADR-0033 de notify-v2) : une clé d'un
+`NotifyServiceAccount` (`serviceAccountRef`, même namespace, même
+instance), `scopes`, `channels`, `secretTargets` (format `SecretTarget` du
+kit : clés `NOTIFY_API_KEY`, `NOTIFY_URL`). Chaque instance déclare un
+`[[key_issuers]]` (`weebo-notify-operator`, jeton généré dans
+`<instance>-key-issuer`, lu au boot) ; l'opérateur appelle
+`POST/GET/DELETE /api/v1/apikeys` sur le `Service` de l'instance. Clé non
+relisible : nouvelle clé quand une cible l'a perdue, quand compte, scopes
+ou canaux changent, ou sur `notify.weebo.io/rotate-secret` ; écrite
+partout avant la révocation de l'ancienne. Les clés d'une CR portent le
+label `weebo-notify:<namespace>/<name>` : celles d'une passe interrompue
+sont révoquées par la suivante. Suppression : révocation puis cibles
+supprimées. Vault : connexion de l'opérateur (values du chart
+`secretStore`), jamais de l'instance (son auteur pourrait sinon viser
+n'importe quel chemin avec l'identité Vault de l'opérateur) ; chaque objet
+écrit sous `<pathPrefix>/<son namespace>/`, sans `pathGrants`.
 
 ### Rendu et validation de la config
 

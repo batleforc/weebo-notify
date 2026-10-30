@@ -10,12 +10,12 @@
 use std::time::Duration;
 
 use adapters_inbound::controller;
-use api::{Channel, LocalInstance, ServiceAccount};
+use api::{ApiKey, Channel, LocalInstance, ServiceAccount};
 use application::ports::{AppliedConfig, Replica};
 use application::test_support::FakeReplicas;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{ConfigMap, Service};
+use k8s_openapi::api::core::v1::{ConfigMap, Secret, Service};
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use kube::api::{Api, Patch, PatchParams, PostParams};
 use kube::{Client, ResourceExt};
@@ -50,6 +50,10 @@ fn instance_conditions(i: &LocalInstance) -> Option<&[weebo_kit_api::Condition]>
 
 fn channel_conditions(c: &Channel) -> Option<&[weebo_kit_api::Condition]> {
     c.status.as_ref().map(|s| s.conditions.as_slice())
+}
+
+fn key_conditions(k: &ApiKey) -> Option<&[weebo_kit_api::Condition]> {
+    k.status.as_ref().map(|s| s.conditions.as_slice())
 }
 
 fn account_conditions(c: &ServiceAccount) -> Option<&[weebo_kit_api::Condition]> {
@@ -352,4 +356,96 @@ async fn the_oldest_object_keeps_an_id_across_namespaces() {
             .contains(&controller::FINALIZER.to_string())
     );
     assert_eq!(bound.status.unwrap().instance.unwrap().name, "main");
+}
+
+#[tokio::test]
+async fn an_api_key_is_minted_into_a_secret_and_revoked_with_its_cr() {
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .try_init()
+        .unwrap_or_default();
+    let cluster = testkit::envtest::start().await;
+    let client = cluster.client();
+    common::namespace(&client, "team", &[]).await;
+    common::instance_secrets(&client, "team").await;
+    let (ctx, health, replicas, issuer) = common::ctx_with_issuer(&client, WatchScope::cluster());
+    tokio::spawn(controller::local_instance::run(client.clone(), ctx.clone()));
+    tokio::spawn(controller::object::run::<ServiceAccount>(
+        client.clone(),
+        ctx.clone(),
+    ));
+    tokio::spawn(controller::api_key::run(client.clone(), ctx));
+    let pp = PostParams::default();
+    let instances: Api<LocalInstance> = Api::namespaced(client.clone(), "team");
+    let keys: Api<ApiKey> = Api::namespaced(client.clone(), "team");
+    instances
+        .create(
+            &pp,
+            &cr(
+                "NotifyLocalInstance",
+                "main",
+                "team",
+                instance_spec(json!({})),
+            ),
+        )
+        .await
+        .unwrap();
+    Api::<ServiceAccount>::namespaced(client.clone(), "team")
+        .create(&pp, &cr("NotifyServiceAccount", "ci", "team", json!({})))
+        .await
+        .unwrap();
+    keys.create(
+        &pp,
+        &cr(
+            "NotifyApiKey",
+            "deploy",
+            "team",
+            json!({"serviceAccountRef": {"name": "ci"}, "scopes": ["publish"],
+                   "channels": ["alerts"]}),
+        ),
+    )
+    .await
+    .unwrap();
+
+    // Nothing minted before the account is applied by every pod.
+    let job = application::workload::migrate_job("main", IMAGE);
+    let jobs: Api<Job> = Api::namespaced(client.clone(), "team");
+    common::appears(&jobs, &job).await;
+    job_succeeded(&client, &job).await;
+    let deployments: Api<Deployment> = Api::namespaced(client.clone(), "team");
+    common::appears(&deployments, "main").await;
+    rolled_out(&client, "main").await;
+    let applied = digest(&instances, None).await;
+    reason_is(&keys, "deploy", "ServiceAccountNotReady", key_conditions).await;
+    assert!(issuer.keys().is_empty());
+
+    // Applied: minted with the instance's generated issuer token, written.
+    pods_report(&replicas, &applied, &[]);
+    nudge(&instances, "main", 1).await;
+    reason_is(&keys, "deploy", "Reconciled", key_conditions).await;
+    let secrets: Api<Secret> = Api::namespaced(client.clone(), "team");
+    let issuer_token = secrets.get("main-key-issuer").await.unwrap().data.unwrap()["key"].clone();
+    let token = String::from_utf8(issuer_token.0).unwrap();
+    assert!(
+        issuer
+            .tokens
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|t| *t == format!("wki_weebo-notify-operator_{token}"))
+    );
+    let target = secrets.get("deploy").await.unwrap();
+    let data = target.data.unwrap();
+    assert_eq!(data["NOTIFY_API_KEY"].0, b"wnk_p1_secret");
+    assert_eq!(data["NOTIFY_URL"].0, b"http://main.team.svc:8080");
+    let status = keys.get("deploy").await.unwrap().status.unwrap();
+    assert_eq!(status.service_account.as_deref(), Some("ci"));
+    assert_eq!(status.key_id.as_deref(), Some("key-1"));
+
+    // Deleted: revoked, its Secret gone.
+    keys.delete("deploy", &Default::default()).await.unwrap();
+    wait_for_absence(&keys, "deploy", TIMEOUT, POLL).await;
+    assert!(issuer.live().is_empty());
+    assert!(secrets.get_opt("deploy").await.unwrap().is_none());
+    assert_eq!(health.live(), Ok(()));
 }

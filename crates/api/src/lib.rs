@@ -6,6 +6,7 @@
 //! the CRD's title); the workspace uses them through short re-exports
 //! ([`LocalInstance`], [`Channel`]…).
 
+pub mod api_key;
 pub mod channel;
 pub mod common;
 pub mod local_instance;
@@ -34,6 +35,10 @@ pub const MANAGED_BY: &str = "weebo-notify";
 /// or the instance's pods to mount it.
 pub const CREDENTIAL_LABEL: &str = "notify.weebo.io/credential";
 
+/// The annotation naming the CR that wrote a `Secret` (an API key's
+/// target): never overwritten nor deleted for another CR.
+pub const SECRET_OWNER_ANNOTATION: &str = "notify.weebo.io/owner";
+
 /// The operator's own annotations.
 pub mod annotations {
     /// On the pod template: the hash of what the server reads at boot only
@@ -50,6 +55,7 @@ pub mod kinds {
     pub const SERVICE_ACCOUNT: &str = "NotifyServiceAccount";
     pub const TRANSFORM: &str = "NotifyTransform";
     pub const TRUST_POLICY: &str = "NotifyTrustPolicy";
+    pub const API_KEY: &str = "NotifyApiKey";
 }
 
 /// The Notify images the operator targets, and the versions it is tested
@@ -67,6 +73,7 @@ pub mod notify {
     pub const SUPPORTED_VERSIONS: &[&str] = &["v0.3.1"];
 }
 
+pub use api_key::ApiKey;
 pub use channel::Channel;
 pub use local_instance::LocalInstance;
 pub use service_account::ServiceAccount;
@@ -86,5 +93,6 @@ mod tests {
         assert_eq!(ServiceAccount::kind(&()), kinds::SERVICE_ACCOUNT);
         assert_eq!(Transform::kind(&()), kinds::TRANSFORM);
         assert_eq!(TrustPolicy::kind(&()), kinds::TRUST_POLICY);
+        assert_eq!(ApiKey::kind(&()), kinds::API_KEY);
     }
 }
